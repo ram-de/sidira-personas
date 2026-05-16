@@ -1,0 +1,548 @@
+{
+  "schema_version": "1.0",
+  "company_id": "doordash",
+  "run_id": "dd-20260516T081509",
+  "created_at": "2026-05-16T08:15:21.270307",
+  "n_users": 8823,
+  "feature_groups": [
+    "demographic_identity",
+    "behavioral_patterns",
+    "motivations_jtbd",
+    "pain_points_friction",
+    "value_sensitivity",
+    "channel_tech_behavior",
+    "loyalty_lifecycle"
+  ],
+  "personas": [
+    {
+      "id": "P01",
+      "name": "Persona P01",
+      "description": "(to be generated)",
+      "jtbd": "(to be generated)",
+      "size": 171,
+      "weights": {
+        "by_headcount": 0.019381162869772185,
+        "by_orders": 0.02152001734780668,
+        "by_revenue": null
+      },
+      "stability": 0.43946731380670245,
+      "top_features": [
+        {
+          "feature": "country_id_5",
+          "group": "demographic_identity",
+          "centroid_value": 0.2573099415204678,
+          "population_mean": 0.021647965544599343,
+          "population_std": 0.14553945125876525,
+          "z_delta": 1.619230895387037
+        },
+        {
+          "feature": "region_name_Australia",
+          "group": "demographic_identity",
+          "centroid_value": 0.2573099415204678,
+          "population_mean": 0.021647965544599343,
+          "population_std": 0.14553945125876525,
+          "z_delta": 1.619230895387037
+        },
+        {
+          "feature": "country_id_1",
+          "group": "demographic_identity",
+          "centroid_value": 0.7076023391812866,
+          "population_mean": 0.9424232120593903,
+          "population_std": 0.23295461394158543,
+          "z_delta": -1.0080112555185803
+        },
+        {
+          "feature": "nv_order_frequency_28d",
+          "group": "behavioral_patterns",
+          "centroid_value": 1.3929056026202513,
+          "population_mean": -1.2079951305000003e-17,
+          "population_std": 1.0,
+          "z_delta": 1.3929056026202513
+        },
+        {
+          "feature": "category_motivation_profile__grocery",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.205353119219722,
+          "population_mean": 0.045479219412688246,
+          "population_std": 0.0887098229401416,
+          "z_delta": 1.8022119141745023
+        },
+        {
+          "feature": "weekly_grocery_stockup_flag",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.7076023391812866,
+          "population_mean": 0.1386149835656806,
+          "population_std": 0.34556389328360887,
+          "z_delta": 1.6465474740690877
+        },
+        {
+          "feature": "category_motivation_profile__restaurant",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.6479819028069803,
+          "population_mean": 0.8630164858059952,
+          "population_std": 0.16446846480525273,
+          "z_delta": -1.3074517552871765
+        },
+        {
+          "feature": "app_uninstall_after_notif",
+          "group": "pain_points_friction",
+          "centroid_value": 0.02213998830409357,
+          "population_mean": 0.0022159058143488607,
+          "population_std": 0.01605663219030693,
+          "z_delta": 1.2408631058867052
+        },
+        {
+          "feature": "notification_message_type_REMINDERS",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.3684210526315789,
+          "population_mean": 0.04012240734444067,
+          "population_std": 0.19625739550734098,
+          "z_delta": 1.6727963011964984
+        },
+        {
+          "feature": "notification_message_type_SPECIAL_OFFERS",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.23976608187134502,
+          "population_mean": 0.020401224073444406,
+          "population_std": 0.14137637529191402,
+          "z_delta": 1.551637303933956
+        },
+        {
+          "feature": "uninstall_within_24h",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.02213998830409357,
+          "population_mean": 0.0022159058143488607,
+          "population_std": 0.01605663219030693,
+          "z_delta": 1.2408631058867052
+        }
+      ],
+      "centroid": {
+        "country_id_5": 0.2573099415204678,
+        "region_name_Australia": 0.2573099415204678,
+        "country_id_1": 0.7076023391812866,
+        "nv_order_frequency_28d": 1.3929056026202513,
+        "category_motivation_profile__grocery": 0.205353119219722,
+        "weekly_grocery_stockup_flag": 0.7076023391812866,
+        "category_motivation_profile__restaurant": 0.6479819028069803,
+        "app_uninstall_after_notif": 0.02213998830409357,
+        "notification_message_type_REMINDERS": 0.3684210526315789,
+        "notification_message_type_SPECIAL_OFFERS": 0.23976608187134502,
+        "uninstall_within_24h": 0.02213998830409357
+      }
+    },
+    {
+      "id": "P02",
+      "name": "Persona P02",
+      "description": "(to be generated)",
+      "jtbd": "(to be generated)",
+      "size": 400,
+      "weights": {
+        "by_headcount": 0.04533605349654313,
+        "by_orders": 0.044589547525411166,
+        "by_revenue": null
+      },
+      "stability": 0.43946731380670245,
+      "top_features": [
+        {
+          "feature": "app_uninstall_after_notif",
+          "group": "pain_points_friction",
+          "centroid_value": 0.035919355,
+          "population_mean": 0.0022159058143488607,
+          "population_std": 0.01605663219030693,
+          "z_delta": 2.0990360111753223
+        },
+        {
+          "feature": "promo_dependency_score",
+          "group": "pain_points_friction",
+          "centroid_value": 0.0447667484529598,
+          "population_mean": 0.02016005570505407,
+          "population_std": 0.03767638550684899,
+          "z_delta": 0.6531065126571817
+        },
+        {
+          "feature": "uninstall_within_24h",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.035919355,
+          "population_mean": 0.0022159058143488607,
+          "population_std": 0.01605663219030693,
+          "z_delta": 2.0990360111753223
+        },
+        {
+          "feature": "notification_message_type_UNKNOWN",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.2425,
+          "population_mean": 0.014734217386376517,
+          "population_std": 0.12049384126685958,
+          "z_delta": 1.8902690811324296
+        },
+        {
+          "feature": "notification_message_type_overall_UNKNOWN",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.2425,
+          "population_mean": 0.016887679927462314,
+          "population_std": 0.12885793780530194,
+          "z_delta": 1.750860862086951
+        }
+      ],
+      "centroid": {
+        "app_uninstall_after_notif": 0.035919355,
+        "promo_dependency_score": 0.0447667484529598,
+        "uninstall_within_24h": 0.035919355,
+        "notification_message_type_UNKNOWN": 0.2425,
+        "notification_message_type_overall_UNKNOWN": 0.2425
+      }
+    },
+    {
+      "id": "P03",
+      "name": "Persona P03",
+      "description": "(to be generated)",
+      "jtbd": "(to be generated)",
+      "size": 473,
+      "weights": {
+        "by_headcount": 0.05360988325966225,
+        "by_orders": 0.03135158151363824,
+        "by_revenue": null
+      },
+      "stability": 0.43946731380670245,
+      "top_features": [
+        {
+          "feature": "order_frequency_90d",
+          "group": "behavioral_patterns",
+          "centroid_value": -0.5036370595660755,
+          "population_mean": 4.767554115040001e-16,
+          "population_std": 1.0,
+          "z_delta": -0.503637059566076
+        },
+        {
+          "feature": "order_frequency_28d",
+          "group": "behavioral_patterns",
+          "centroid_value": -0.5033119502856338,
+          "population_mean": 4.993046539400001e-16,
+          "population_std": 0.9999999999999999,
+          "z_delta": -0.5033119502856344
+        },
+        {
+          "feature": "reminder_triggered_order_share",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.0611448331644661,
+          "population_mean": 0.34339717306660444,
+          "population_std": 0.3295093495314163,
+          "z_delta": -0.8565837063607435
+        },
+        {
+          "feature": "promo_triggered_order_share",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.11247041350315647,
+          "population_mean": 0.2706745526828105,
+          "population_std": 0.1961623970113773,
+          "z_delta": -0.8064957483695424
+        },
+        {
+          "feature": "device_type_notif_",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.6828752642706131,
+          "population_mean": 0.04476935282783634,
+          "population_std": 0.2068088620490275,
+          "z_delta": 3.0854863042160305
+        },
+        {
+          "feature": "notification_message_type_SPECIAL_OFFERS",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.2832980972515856,
+          "population_mean": 0.020401224073444406,
+          "population_std": 0.14137637529191402,
+          "z_delta": 1.8595530733852215
+        },
+        {
+          "feature": "device_type_notif_ios",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.24101479915433405,
+          "population_mean": 0.8006347047489516,
+          "population_std": 0.3995458266137071,
+          "z_delta": -1.400640097626836
+        }
+      ],
+      "centroid": {
+        "order_frequency_90d": -0.5036370595660755,
+        "order_frequency_28d": -0.5033119502856338,
+        "reminder_triggered_order_share": 0.0611448331644661,
+        "promo_triggered_order_share": 0.11247041350315647,
+        "device_type_notif_": 0.6828752642706131,
+        "notification_message_type_SPECIAL_OFFERS": 0.2832980972515856,
+        "device_type_notif_ios": 0.24101479915433405
+      }
+    },
+    {
+      "id": "P04",
+      "name": "Persona P04",
+      "description": "(to be generated)",
+      "jtbd": "(to be generated)",
+      "size": 4648,
+      "weights": {
+        "by_headcount": 0.5268049416298312,
+        "by_orders": 0.46563623712599056,
+        "by_revenue": null
+      },
+      "stability": 0.43946731380670245,
+      "top_features": [
+        {
+          "feature": "nv_order_frequency_28d",
+          "group": "behavioral_patterns",
+          "centroid_value": -0.5808392402554041,
+          "population_mean": -1.2079951305000003e-17,
+          "population_std": 1.0,
+          "z_delta": -0.5808392402554041
+        }
+      ],
+      "centroid": {
+        "nv_order_frequency_28d": -0.5808392402554041
+      }
+    },
+    {
+      "id": "P05",
+      "name": "Persona P05",
+      "description": "(to be generated)",
+      "jtbd": "(to be generated)",
+      "size": 1543,
+      "weights": {
+        "by_headcount": 0.1748838263629151,
+        "by_orders": 0.18832133653902836,
+        "by_revenue": null
+      },
+      "stability": 0.43946731380670245,
+      "top_features": [
+        {
+          "feature": "notification_message_type_REMINDERS",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.1561892417368762,
+          "population_mean": 0.04012240734444067,
+          "population_std": 0.19625739550734098,
+          "z_delta": 0.5914010735360751
+        }
+      ],
+      "centroid": {
+        "notification_message_type_REMINDERS": 0.1561892417368762
+      }
+    },
+    {
+      "id": "P06",
+      "name": "Persona P06",
+      "description": "(to be generated)",
+      "jtbd": "(to be generated)",
+      "size": 1365,
+      "weights": {
+        "by_headcount": 0.1547092825569534,
+        "by_orders": 0.21877131632799143,
+        "by_revenue": null
+      },
+      "stability": 0.43946731380670245,
+      "top_features": [
+        {
+          "feature": "nv_order_frequency_28d",
+          "group": "behavioral_patterns",
+          "centroid_value": 1.5153541795532568,
+          "population_mean": -1.2079951305000003e-17,
+          "population_std": 1.0,
+          "z_delta": 1.5153541795532568
+        },
+        {
+          "feature": "order_frequency_28d",
+          "group": "behavioral_patterns",
+          "centroid_value": 0.579628107199862,
+          "population_mean": 4.993046539400001e-16,
+          "population_std": 0.9999999999999999,
+          "z_delta": 0.5796281071998617
+        },
+        {
+          "feature": "order_frequency_90d",
+          "group": "behavioral_patterns",
+          "centroid_value": 0.5673406598537537,
+          "population_mean": 4.767554115040001e-16,
+          "population_std": 1.0,
+          "z_delta": 0.5673406598537533
+        },
+        {
+          "feature": "weekly_grocery_stockup_flag",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.7677655677655678,
+          "population_mean": 0.1386149835656806,
+          "population_std": 0.34556389328360887,
+          "z_delta": 1.8206490794555756
+        },
+        {
+          "feature": "category_motivation_profile__grocery",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.12700206398691682,
+          "population_mean": 0.045479219412688246,
+          "population_std": 0.0887098229401416,
+          "z_delta": 0.918983285867197
+        },
+        {
+          "feature": "category_motivation_profile__restaurant",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.7396488509436362,
+          "population_mean": 0.8630164858059952,
+          "population_std": 0.16446846480525273,
+          "z_delta": -0.7500990235936035
+        },
+        {
+          "feature": "num_notifications_weekly",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.5545003083735853,
+          "population_mean": -2.577056278400001e-16,
+          "population_std": 1.0,
+          "z_delta": 0.5545003083735855
+        },
+        {
+          "feature": "notification_message_type_STORE_PROMOTIONS",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.4,
+          "population_mean": 0.18723790094072312,
+          "population_std": 0.3901244922251188,
+          "z_delta": 0.5453697558073435
+        },
+        {
+          "feature": "order_within_24h",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.3735910615384615,
+          "population_mean": 0.2706745528731724,
+          "population_std": 0.196162395765854,
+          "z_delta": 0.5246495296077731
+        }
+      ],
+      "centroid": {
+        "nv_order_frequency_28d": 1.5153541795532568,
+        "order_frequency_28d": 0.579628107199862,
+        "order_frequency_90d": 0.5673406598537537,
+        "weekly_grocery_stockup_flag": 0.7677655677655678,
+        "category_motivation_profile__grocery": 0.12700206398691682,
+        "category_motivation_profile__restaurant": 0.7396488509436362,
+        "num_notifications_weekly": 0.5545003083735853,
+        "notification_message_type_STORE_PROMOTIONS": 0.4,
+        "order_within_24h": 0.3735910615384615
+      }
+    },
+    {
+      "id": "P07",
+      "name": "Persona P07",
+      "description": "(to be generated)",
+      "jtbd": "(to be generated)",
+      "size": 223,
+      "weights": {
+        "by_headcount": 0.025274849824322793,
+        "by_orders": 0.02980996362013356,
+        "by_revenue": null
+      },
+      "stability": 0.43946731380670245,
+      "top_features": [
+        {
+          "feature": "consumer_experience_doordash",
+          "group": "demographic_identity",
+          "centroid_value": 0.905829596412556,
+          "population_mean": 0.9975065170576901,
+          "population_std": 0.04987531878679087,
+          "z_delta": -1.8381219985187163
+        },
+        {
+          "feature": "consumer_experience_caviar",
+          "group": "demographic_identity",
+          "centroid_value": 0.09417040358744394,
+          "population_mean": 0.002493482942309872,
+          "population_std": 0.04987531878679087,
+          "z_delta": 1.8381219985187154
+        },
+        {
+          "feature": "notification_unsubscribe_rate",
+          "group": "pain_points_friction",
+          "centroid_value": 0.007569587443946189,
+          "population_mean": 0.0001964836223506744,
+          "population_std": 0.004275016359301406,
+          "z_delta": 1.7246960483679592
+        },
+        {
+          "feature": "notification_channel_PUSH",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.547085201793722,
+          "population_mean": 0.9775586535192111,
+          "population_std": 0.14812231147363156,
+          "z_delta": -2.9062026337748663
+        },
+        {
+          "feature": "notification_channel_SMS",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.42152466367713004,
+          "population_mean": 0.021647965544599343,
+          "population_std": 0.14553945125876525,
+          "z_delta": 2.7475484803193373
+        },
+        {
+          "feature": "notification_message_type_overall_TRANSACTIONAL",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.6771300448430493,
+          "population_mean": 0.9808455173977105,
+          "population_std": 0.13707559238494024,
+          "z_delta": -2.215678716176964
+        }
+      ],
+      "centroid": {
+        "consumer_experience_doordash": 0.905829596412556,
+        "consumer_experience_caviar": 0.09417040358744394,
+        "notification_unsubscribe_rate": 0.007569587443946189,
+        "notification_channel_PUSH": 0.547085201793722,
+        "notification_channel_SMS": 0.42152466367713004,
+        "notification_message_type_overall_TRANSACTIONAL": 0.6771300448430493
+      }
+    },
+    {
+      "id": "FIXED_CHURNED_RESURRECTE",
+      "name": "Fixed \u2014 Churned Resurrected",
+      "description": "Pre-defined lifestage segment: Churned Resurrected",
+      "jtbd": "(lifestage-derived; not behavioral)",
+      "size": 258,
+      "weights": {
+        "by_headcount": 0.0258,
+        "by_orders": 0.004573482609320215,
+        "by_revenue": null
+      },
+      "stability": 1.0,
+      "top_features": [],
+      "centroid": {}
+    },
+    {
+      "id": "FIXED_DORMANT_RESURRECTE",
+      "name": "Fixed \u2014 Dormant Resurrected",
+      "description": "Pre-defined lifestage segment: Dormant Resurrected",
+      "jtbd": "(lifestage-derived; not behavioral)",
+      "size": 794,
+      "weights": {
+        "by_headcount": 0.0794,
+        "by_orders": 0.022201657781821246,
+        "by_revenue": null
+      },
+      "stability": 1.0,
+      "top_features": [],
+      "centroid": {}
+    },
+    {
+      "id": "FIXED_NEW_CX",
+      "name": "Fixed \u2014 New Cx",
+      "description": "Pre-defined lifestage segment: New Cx",
+      "jtbd": "(lifestage-derived; not behavioral)",
+      "size": 125,
+      "weights": {
+        "by_headcount": 0.0125,
+        "by_orders": 0.00022251589426679734,
+        "by_revenue": null
+      },
+      "stability": 1.0,
+      "top_features": [],
+      "centroid": {}
+    }
+  ],
+  "cluster_method": "gmm",
+  "k_selected": 7,
+  "encoder_method": "pca",
+  "embedding_dim_per_group": 8,
+  "overall_stability": 0.43946731380670245,
+  "notes": {}
+}
