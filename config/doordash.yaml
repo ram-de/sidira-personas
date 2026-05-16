@@ -98,9 +98,21 @@ encoder:
   method: pca
   embedding_dim_per_group: 8
 
+# Optional prefilter: restrict clustering to a subpopulation.
+# Pre-defined lifestage segments (Dormant/Churned/New) are emitted as
+# fixed personas; we cluster only within the filtered set.
+prefilter:
+  column: cx_lifestage_detailed_status
+  values: [Active]
+
+# Groups whose features feed Layer A profiling but NOT the clustering embedding.
+# Demographic identity and loyalty_lifecycle are demoted — they describe WHO a
+# user is, not how they behave, and were dominating cluster geometry in run #1.
+clustering_exclude_groups: [demographic_identity, loyalty_lifecycle]
+
 cluster:
   method: gmm
-  k_range: [5, 12]
+  k_range: [4, 8]
   selection: bic
   random_state: 42
   bootstrap_iters: 20

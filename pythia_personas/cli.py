@@ -45,6 +45,16 @@ def run(config_path: str, out_dir: str, limit: int | None) -> None:
         df = df.head(limit)
     click.echo(f"      {len(df):,} rows, {df.shape[1]} columns")
 
+    pre = cfg.get("prefilter")
+    excluded_df = None
+    if pre:
+        col, vals = pre["column"], pre["values"]
+        if col in df.columns:
+            mask = df[col].isin(vals)
+            excluded_df = df.loc[~mask].copy()
+            df = df.loc[mask].copy().reset_index(drop=True)
+            click.echo(f"      prefilter {col} ∈ {vals}: kept {len(df):,}, set aside {len(excluded_df):,}")
+
     click.echo("[2/6] Layer A — adapting per group …")
     groups = {g: specs for g, specs in cfg["feature_groups"].items()}
     snapshot_col = cfg.get("snapshot_date_column")
@@ -57,7 +67,11 @@ def run(config_path: str, out_dir: str, limit: int | None) -> None:
 
     click.echo("[3/6] Layer B — encoding per group …")
     dim = cfg["encoder"]["embedding_dim_per_group"]
-    X, _models = encode_all(adapted, dim)
+    excluded_groups = set(cfg.get("clustering_exclude_groups") or [])
+    adapted_for_cluster = {g: f for g, f in adapted.items() if g not in excluded_groups}
+    if excluded_groups:
+        click.echo(f"      excluding from embedding: {sorted(excluded_groups)}")
+    X, _models = encode_all(adapted_for_cluster, dim)
     click.echo(f"      embedding shape: {X.shape}")
 
     click.echo("[4/6] Layer C — clustering (GMM + BIC) …")
@@ -102,6 +116,27 @@ def run(config_path: str, out_dir: str, limit: int | None) -> None:
             centroid={f["feature"]: f["centroid_value"] for f in feats},
         )
         personas.append(persona)
+
+    if excluded_df is not None and len(excluded_df) > 0:
+        click.echo(f"      adding {excluded_df[pre['column']].nunique()} fixed personas from prefilter")
+        for fixed_val, sub in excluded_df.groupby(pre["column"]):
+            cid_label = f"FIXED_{str(fixed_val).upper().replace(' ', '_')}"
+            w: dict[str, float] = {"by_headcount": float(len(sub) / (len(df) + len(excluded_df)))}
+            orders_col = cfg["weights"].get("orders_column")
+            if orders_col and orders_col in sub.columns:
+                tot_all = float(pd.concat([df, excluded_df])[orders_col].sum()) or 1.0
+                w["by_orders"] = float(sub[orders_col].sum() / tot_all)
+            personas.append(Persona(
+                id=cid_label[:24],
+                name=f"Fixed — {fixed_val}",
+                description=f"Pre-defined lifestage segment: {fixed_val}",
+                jtbd="(lifestage-derived; not behavioral)",
+                size=int(len(sub)),
+                weights=PersonaWeights(**w),
+                stability=1.0,
+                top_features=[],
+                centroid={},
+            ))
 
     click.echo("[6/6] Layer E — compiling prompts + writing artifacts …")
     pack = PersonaPack(
