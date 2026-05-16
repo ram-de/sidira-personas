@@ -1,0 +1,155 @@
+# DoorDash company config for pythia-personas
+# This is the ONLY company-specific file. Swap it to retarget the pipeline.
+
+company_id: doordash
+run_id_prefix: dd
+
+source:
+  type: snowflake
+  # Connection comes from env vars: SNOWFLAKE_ACCOUNT / USER / PASSWORD / WAREHOUSE / ROLE
+  database: PRODDB
+  schema: PUBLIC
+  table: persona_input_10k          # TODO: replace with the real table name
+  user_id_column: consumer_id
+
+# Map each feature group → its metrics in YOUR data.
+# Metric type drives Layer A normalization:
+#   count      → log1p + z-score
+#   ratio      → identity (already in [0,1] or normalized)
+#   flag       → 0/1
+#   score      → z-score
+#   categorical → one-hot
+feature_groups:
+
+  demographic_identity:
+    - {name: signup_tenure_days,           type: count}
+    - {name: first_order_tenure_days,      type: count}
+    - {name: country_id,                   type: categorical}
+    - {name: region_name,                  type: categorical}
+    - {name: submarket_id,                 type: categorical}
+    - {name: consumer_experience,          type: categorical}
+    - {name: dashpass_status,              type: categorical}
+    - {name: is_employee,                  type: flag}
+    - {name: is_internal_dd_consumer,      type: flag}
+    - {name: device_footprint,             type: count}
+    - {name: notification_reachability_profile, type: categorical}
+    - {name: promo_eligibility_profile,    type: count}
+    - {name: fraud_risk_flags,             type: flag}
+
+  behavioral_patterns:
+    - {name: total_orders_lifetime,        type: count}
+    - {name: order_frequency_28d,          type: count}
+    - {name: order_frequency_90d,          type: count}
+    - {name: lifestage_status_behavioral,  type: categorical}
+    - {name: nv_order_frequency_28d,       type: count}
+    - {name: avg_days_between_orders,      type: score}
+    - {name: weekday_share,                type: ratio}
+    - {name: weekend_share,                type: ratio}
+    - {name: late_night_share,             type: ratio}
+    - {name: app_session_frequency_28d,    type: count}
+    - {name: notif_open_rate,              type: ratio}
+    - {name: channel_marketplace_share,    type: ratio}
+    - {name: channel_app_share,            type: ratio}
+    - {name: category_restaurant_share,    type: ratio}
+    - {name: category_grocery_share,       type: ratio}
+    - {name: category_retail_share,        type: ratio}
+    - {name: hub_usage_frequency,          type: count}
+
+  motivations_jtbd:
+    - {name: weekly_grocery_stockup_flag,  type: flag}
+    - {name: convenience_small_basket_pattern, type: ratio}
+    - {name: speed_seeker_flag,            type: flag}
+    - {name: value_deals_shopper_flag,     type: flag}
+    - {name: dashpass_value_seeker,        type: flag}
+    - {name: goto_merchant_loyalist_score, type: score}
+    - {name: promo_triggered_order_share,  type: ratio}
+    - {name: reminder_triggered_order_share, type: ratio}
+    - {name: deals_engine_engagement,      type: count}
+    - {name: loyalty_program_motivation,   type: score}
+    - {name: health_of_subscription_jtbd,  type: score}
+
+  pain_points_friction:
+    - {name: min_order_value_segment,      type: score}
+    - {name: out_of_pocket_pct_subtotal,   type: ratio}
+    - {name: high_fee_order_rate,          type: ratio}
+    - {name: order_drop_at_fee_change,     type: score}
+    - {name: notification_unsubscribe_rate,type: ratio}
+    - {name: mark_as_spam_within_24h,      type: ratio}
+    - {name: app_uninstall_after_notif,    type: flag}
+    - {name: promo_redemption_cap_reached, type: flag}
+    - {name: suppressed_for_low_roi,       type: flag}
+    - {name: high_price_variance_exposure, type: score}
+    - {name: promo_dependency_score,       type: score}
+
+  value_sensitivity:
+    - {name: price_sensitivity_score,      type: score}
+    - {name: promo_sensitivity_score,      type: score}
+    - {name: is_low_roi_cx,                type: flag}
+    - {name: consumer_out_of_pocket_per_order, type: score}
+    - {name: volume_with_fee_discount_share, type: ratio}
+    - {name: avg_delivery_fee_discount,    type: score}
+    - {name: avg_service_fee_discount,     type: score}
+    - {name: promo_redeemer_flag,          type: flag}
+    - {name: price_vs_amazon_ratio,        type: score}
+    - {name: price_vs_walmart_ratio,       type: score}
+    - {name: promo_targeting_value_segment,type: categorical}
+
+  channel_tech_behavior:
+    - {name: device_type_primary,          type: categorical}
+    - {name: notif_channel_push_share,     type: ratio}
+    - {name: notif_channel_email_share,    type: ratio}
+    - {name: notif_channel_sms_share,      type: ratio}
+    - {name: marketing_notif_share,        type: ratio}
+    - {name: transactional_notif_share,    type: ratio}
+    - {name: avg_notif_per_week,           type: count}
+    - {name: open_within_24h_rate,         type: ratio}
+    - {name: link_click_within_24h_rate,   type: ratio}
+    - {name: visit_within_24h_rate,        type: ratio}
+    - {name: order_within_24h_rate,        type: ratio}
+    - {name: unsubscribe_within_24h_rate,  type: ratio}
+    - {name: push_subscribed_status,       type: categorical}
+    - {name: hub_view_to_click_rate,       type: ratio}
+    - {name: hub_revisit_rate,             type: ratio}
+
+  loyalty_lifecycle:
+    - {name: cx_lifestage_detailed_status, type: categorical}
+    - {name: cx_lifestage_status,          type: categorical}
+    - {name: cx_lifestage_status_bucket,   type: categorical}
+    - {name: new_consumer_28d_flag,        type: flag}
+    - {name: dormant_resurrected_28d_flag, type: flag}
+    - {name: churned_resurrected_28d_flag, type: flag}
+    - {name: active_28d_flag,              type: flag}
+    - {name: churned_28d_flag,             type: flag}
+    - {name: active_90d_flag,              type: flag}
+    - {name: churned_90d_flag,             type: flag}
+    - {name: has_redeemed_is_loyalty,      type: flag}
+    - {name: total_points_earned,          type: count}
+    - {name: total_points_redeemed,        type: count}
+    - {name: points_balance,               type: count}
+    - {name: num_orders_earned_points,     type: count}
+    - {name: num_orders_redeemed_points,   type: count}
+    - {name: avg_loyalty_order_frequency,  type: score}
+    - {name: upss_lifestage_attribute,     type: categorical}
+    - {name: upss_churn_score,             type: score}
+    - {name: upss_engagement_score,        type: score}
+
+encoder:
+  method: pca
+  embedding_dim_per_group: 8
+
+cluster:
+  method: gmm
+  k_range: [5, 12]
+  selection: bic
+  random_state: 42
+  bootstrap_iters: 30
+  stability_threshold: 0.70
+
+weights:
+  schemes: [headcount, orders, revenue]
+  orders_column: total_orders_lifetime
+  revenue_column: lifetime_gov
+
+prompt_compiler:
+  top_n_distinctive_features_per_group: 3
+  threshold_sigma: 0.5
