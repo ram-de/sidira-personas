@@ -47,7 +47,11 @@ def run(config_path: str, out_dir: str, limit: int | None) -> None:
 
     click.echo("[2/6] Layer A — adapting per group …")
     groups = {g: specs for g, specs in cfg["feature_groups"].items()}
-    adapted = adapt_all(df, groups)
+    snapshot_col = cfg.get("snapshot_date_column")
+    snapshot = None
+    if snapshot_col and snapshot_col in df.columns:
+        snapshot = pd.to_datetime(df[snapshot_col]).max()
+    adapted = adapt_all(df, groups, snapshot=snapshot)
     for g, feats in adapted.items():
         click.echo(f"      {g}: {feats.shape[1]} features")
 
@@ -132,7 +136,23 @@ def run(config_path: str, out_dir: str, limit: int | None) -> None:
     })
     assignments.to_parquet(out / "assignments.parquet", index=False)
 
-    click.secho(f"✓ Persona Pack written to {out}", fg="green")
+    baseline_col = cfg.get("baseline_segment_column")
+    if baseline_col and baseline_col in df.columns:
+        click.echo("\nBaseline segment vs. discovered persona — crosstab:")
+        ct = pd.crosstab(df[baseline_col].fillna("UNK"),
+                         assignments["persona_id"].values,
+                         margins=True, margins_name="TOTAL")
+        click.echo(ct.to_string())
+        ct.to_csv(out / "baseline_crosstab.csv")
+
+    click.echo("\nPersona sizes & weights:")
+    for p in personas:
+        w = p.weights
+        click.echo(f"  {p.id}: n={p.size:>5d}  "
+                   f"headcount={w.by_headcount:.3f}  "
+                   f"orders={(w.by_orders or 0):.3f}")
+
+    click.secho(f"\n✓ Persona Pack written to {out}", fg="green")
 
 
 if __name__ == "__main__":
