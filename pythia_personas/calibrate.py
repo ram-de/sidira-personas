@@ -147,6 +147,27 @@ def profile_clusters(df_raw: pd.DataFrame, feature_groups: dict, labels: np.ndar
                         "delta_abs": v - pop,
                         "delta_pct": (v - pop) / pop if pop else 0.0,
                     }
+        elif mtype == "json_counts":
+            keys = next((s["keys"] for s in feature_groups[group] if s["name"] == name), [])
+            parsed = col.apply(lambda v: _safe_parse_json(v, keys))
+            totals = parsed.apply(lambda d: sum(d.values()))
+            for k in keys:
+                share = parsed.apply(lambda d: d.get(k, 0.0)) / totals.replace(0, np.nan)
+                share = share.fillna(0.0)
+                pop = float(share.mean())
+                qn = f"{name}__{k}"
+                baseline[qn] = {
+                    "group": group, "kind": "ratio", "value": pop,
+                    "value_fmt": f"{pop*100:.1f}%",
+                }
+                for cid in clusters:
+                    v = float(share[labels == cid].mean())
+                    clusters[cid][qn] = {
+                        "group": group, "kind": "ratio", "value": v,
+                        "value_fmt": f"{v*100:.1f}%",
+                        "delta_abs": v - pop,
+                        "delta_pct": (v - pop) / pop if pop else 0.0,
+                    }
 
     return {"baseline": baseline, "clusters": clusters}
 

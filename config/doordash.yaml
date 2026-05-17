@@ -1,114 +1,118 @@
-# DoorDash company config — calibrated to PRODDB.RAMKUMARKARUNANIDHI.CHANNEL_TECH_FEATURES_10K
+# DoorDash config — calibrated to enriched PRODDB.RAMKUMARKARUNANIDHI.CHANNEL_TECH_FEATURES_10K
+# Snapshot 2026-05-14, 10,000 users, 158 columns.
 # Only columns that are actually populated in the source table are included.
-# All-NULL columns from the original spec have been dropped.
 
 company_id: doordash
 run_id_prefix: dd
 
 source:
   type: local
-  path: data/channel_tech_features_10k.parquet
+  path: data/channel_tech_features_10k_v2.parquet
   user_id_column: consumer_id
-  # Original Snowflake source:
-  #   PRODDB.RAMKUMARKARUNANIDHI.CHANNEL_TECH_FEATURES_10K
-
-# Metric type → Layer A normalization:
-#   count      → log1p + z-score
-#   ratio      → identity, clipped to [0,1]
-#   flag       → 0/1 (handles BOOLEAN, 0/1 float)
-#   score      → z-score
-#   categorical → one-hot
-#   json_ratios → parse JSON string, expand named keys as ratios
-#   tenure_days → days between value and snapshot_date, then count-normalize
 
 feature_groups:
 
   demographic_identity:
-    - {name: signup_date,           type: tenure_days}
-    - {name: first_order_date,      type: tenure_days}
-    - {name: country_id,            type: categorical}
-    - {name: region_name,           type: categorical}
-    - {name: consumer_experience,   type: categorical}
+    - {name: signup_date,                      type: tenure_days}
+    - {name: first_order_date,                 type: tenure_days}
+    - {name: country_name,                     type: categorical}
+    - {name: region_name,                      type: categorical}
+    - {name: consumer_experience,              type: categorical}
+    - {name: dashpass_status,                  type: categorical}
+    - {name: device_footprint,                 type: count}
+    - {name: notification_reachability_profile, type: categorical}
+    - {name: notification_reachability_status, type: categorical}
+    - {name: promo_eligibility_profile,        type: count}
+    - {name: fraud_risk_flags,                 type: categorical}
 
   behavioral_patterns:
-    - {name: total_orders_lifetime, type: count}
-    - {name: order_frequency_28d,   type: count}
-    - {name: order_frequency_90d,   type: count}
-    - {name: nv_order_frequency_28d,type: count}
-    - {name: avg_days_between_orders, type: score}
-    - {name: lifestage_status_behavioral, type: categorical}
+    - {name: total_orders_lifetime,            type: count}
+    - {name: order_frequency_28d,              type: count}
+    - {name: order_frequency_90d,              type: count}
+    - {name: nv_order_frequency_28d,           type: count}
+    - {name: avg_days_between_orders,          type: score}
+    - {name: app_session_frequency_28d,        type: count}
+    - {name: lifestage_status_behavioral,      type: categorical}
+    - {name: day_of_week_order_profile,        type: json_counts,
+       keys: [mon, tue, wed, thu, fri, sat, sun]}
+    - {name: time_of_day_order_profile,        type: json_counts,
+       keys: [early_morning_4_8, morning_8_11, lunch_11_14, afternoon_14_17, dinner_17_21, late_night_21_4]}
+    - {name: channel_usage_mix,                type: json_counts,
+       keys: [marketplace, catering, other]}
+    - {name: category_mix_profile,             type: json_counts,
+       keys: [restaurant, grocery, retail, alcohol, rx]}
 
   motivations_jtbd:
-    - {name: weekly_grocery_stockup_flag,    type: flag}
+    - {name: weekly_grocery_stockup_flag,      type: flag}
     - {name: convenience_small_basket_pattern, type: ratio}
-    - {name: speed_seeker_flag,              type: ratio}    # 0..1 float in source
-    - {name: value_deals_shopper_flag,       type: flag}
-    - {name: dashpass_value_seeker,          type: ratio}
-    - {name: category_motivation_profile,    type: json_ratios,
+    - {name: speed_seeker_flag,                type: ratio}
+    - {name: value_deals_shopper_flag,         type: flag}
+    - {name: dashpass_value_seeker,            type: ratio}
+    - {name: category_motivation_profile,      type: json_ratios,
        keys: [grocery, restaurant, retail, rx]}
-    - {name: promo_triggered_order_share,    type: ratio}
-    - {name: reminder_triggered_order_share, type: ratio}
+    - {name: promo_triggered_order_share,      type: ratio}
+    - {name: reminder_triggered_order_share,   type: ratio}
+    - {name: health_of_subscription_jtbd,      type: score}
+    - {name: goto_merchant_loyalist_score,     type: score}
 
   pain_points_friction:
-    - {name: high_fee_order_rate,            type: ratio}
-    - {name: notification_unsubscribe_rate,  type: ratio}
-    - {name: mark_as_spam_within_24h,        type: ratio}
-    - {name: app_uninstall_after_notif,      type: ratio}
-    - {name: promo_dependency_score,         type: ratio}
+    - {name: high_fee_order_rate,              type: ratio}
+    - {name: notification_unsubscribe_rate,    type: ratio}
+    - {name: mark_as_spam_within_24h,          type: ratio}
+    - {name: app_uninstall_after_notif,        type: ratio}
+    - {name: promo_dependency_score,           type: ratio}
+    - {name: out_of_pocket_as_pct_subtotal,    type: ratio}
 
   value_sensitivity:
-    - {name: promo_redeemer_flag,            type: flag}
+    - {name: promo_redeemer_flag,              type: flag}
+    - {name: consumer_out_of_pocket_per_order, type: score}
+    - {name: avg_delivery_fee_discount,        type: score}
+    - {name: avg_service_fee_discount,         type: score}
+    - {name: volume_with_fee_discount_share,   type: ratio}
+    - {name: promo_eligibility_is_eligible,    type: flag}
 
   channel_tech_behavior:
-    - {name: device_type_notif,              type: categorical}
-    - {name: notification_channel,           type: categorical}
-    - {name: notification_source,            type: categorical}
+    - {name: device_type_notif,                type: categorical}
+    - {name: notification_channel,             type: categorical}
+    - {name: notification_source,              type: categorical}
     - {name: notification_message_type_overall, type: categorical}
-    - {name: notification_message_type,      type: categorical}
-    - {name: num_notifications_weekly,       type: count}
-    - {name: open_within_24h,                type: ratio}
-    - {name: link_click_within_24h,          type: ratio}
-    - {name: visit_within_24h,               type: ratio}
-    - {name: order_within_24h,               type: ratio}
-    - {name: unsubscribe_within_24h,         type: ratio}
-    - {name: device_unsubscribe_within_24h,  type: ratio}
-    - {name: uninstall_within_24h,           type: ratio}
-    - {name: marked_as_spam_within_24h,      type: ratio}
+    - {name: notification_message_type,        type: categorical}
+    - {name: num_notifications_weekly,         type: count}
+    - {name: avg_notif_per_cx_weekly,          type: score}
+    - {name: open_within_24h,                  type: ratio}
+    - {name: link_click_within_24h,            type: ratio}
+    - {name: visit_within_24h,                 type: ratio}
+    - {name: order_within_24h,                 type: ratio}
+    - {name: unsubscribe_within_24h,           type: ratio}
+    - {name: device_unsubscribe_within_24h,    type: ratio}
+    - {name: uninstall_within_24h,             type: ratio}
+    - {name: marked_as_spam_within_24h,        type: ratio}
 
   loyalty_lifecycle:
-    - {name: cx_lifestage_detailed_status,   type: categorical}
-    - {name: cx_lifestage_status,            type: categorical}
-    - {name: cx_lifestage_status_bucket,     type: categorical}
-    - {name: new_consumer_28d_agg,           type: count}
-    - {name: dormant_resurrected_28d_agg,    type: count}
-    - {name: churned_resurrected_28d_agg,    type: count}
-    - {name: active_28d_agg,                 type: count}
-    - {name: churned_28d_agg,                type: count}
-    - {name: new_consumer_90d_agg,           type: count}
-    - {name: active_90d_agg,                 type: count}
-    - {name: churned_90d_agg,                type: count}
+    - {name: cx_lifestage_detailed_status,     type: categorical}
+    - {name: cx_lifestage_status,              type: categorical}
+    - {name: cx_lifestage_status_bucket,       type: categorical}
+    - {name: new_consumer_28d_agg,             type: count}
+    - {name: dormant_resurrected_28d_agg,      type: count}
+    - {name: churned_resurrected_28d_agg,      type: count}
+    - {name: active_28d_agg,                   type: count}
+    - {name: churned_28d_agg,                  type: count}
+    - {name: new_consumer_90d_agg,             type: count}
+    - {name: active_90d_agg,                   type: count}
+    - {name: churned_90d_agg,                  type: count}
 
-# Snapshot date column for tenure computation
 snapshot_date_column: snapshot_date
-
-# Existing segmentation column — used for baseline comparison, not as a feature
 baseline_segment_column: hv_mau_segment
 
-encoder:
-  method: pca
-  embedding_dim_per_group: 8
-
-# Optional prefilter: restrict clustering to a subpopulation.
-# Pre-defined lifestage segments (Dormant/Churned/New) are emitted as
-# fixed personas; we cluster only within the filtered set.
 prefilter:
   column: cx_lifestage_detailed_status
   values: [Active]
 
-# Groups whose features feed Layer A profiling but NOT the clustering embedding.
-# Demographic identity and loyalty_lifecycle are demoted — they describe WHO a
-# user is, not how they behave, and were dominating cluster geometry in run #1.
 clustering_exclude_groups: [demographic_identity, loyalty_lifecycle]
+
+encoder:
+  method: pca
+  embedding_dim_per_group: 8
 
 cluster:
   method: gmm
@@ -121,7 +125,7 @@ cluster:
 weights:
   schemes: [headcount, orders]
   orders_column: total_orders_lifetime
-  revenue_column: null   # not available in this snapshot
+  revenue_column: null
 
 prompt_compiler:
   top_n_distinctive_features_per_group: 5

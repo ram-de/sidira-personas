@@ -60,6 +60,28 @@ def _expand_json_ratios(s: pd.Series, name: str, keys: list[str]) -> pd.DataFram
     return df
 
 
+def _expand_json_counts(s: pd.Series, name: str, keys: list[str]) -> pd.DataFrame:
+    """JSON object of integer counts → per-key share (count / total)."""
+    def parse(v):
+        if v is None or (isinstance(v, float) and np.isnan(v)):
+            return {k: 0.0 for k in keys}
+        if isinstance(v, dict):
+            d = v
+        else:
+            try:
+                d = json.loads(v)
+            except (TypeError, ValueError):
+                return {k: 0.0 for k in keys}
+        return {k: float(d.get(k, 0) or 0) for k in keys}
+
+    parsed = s.apply(parse).tolist()
+    df = pd.DataFrame(parsed, index=s.index)
+    total = df.sum(axis=1).replace(0, np.nan)
+    df = df.div(total, axis=0).fillna(0.0).clip(0, 1)
+    df.columns = [f"{name}__{k}" for k in keys]
+    return df
+
+
 def _tenure_days(s: pd.Series, snapshot: pd.Timestamp) -> pd.Series:
     """Days between date column and snapshot date → count-normalized."""
     dt = pd.to_datetime(s, errors="coerce")
@@ -90,6 +112,8 @@ def adapt_group(df: pd.DataFrame, metric_specs: list[dict],
             cols.append(_onehot(df[name], name))
         elif mtype == "json_ratios":
             cols.append(_expand_json_ratios(df[name], name, spec["keys"]))
+        elif mtype == "json_counts":
+            cols.append(_expand_json_counts(df[name], name, spec["keys"]))
         elif mtype == "tenure_days":
             if snapshot is None:
                 continue

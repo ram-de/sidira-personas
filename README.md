@@ -50,7 +50,7 @@ v0.1 — pipeline runs end-to-end on real Snowflake data. First two runs documen
 
 ## Sample output
 
-See [`samples/run_6_explicit_scope/`](samples/run_6_explicit_scope/) for the latest Persona Pack (10 named personas, prompts with explicit baseline scope and fixed-persona snapshots).
+See [`samples/run_9_enriched_features/`](samples/run_9_enriched_features/) for the latest Persona Pack — **first run where stability passes the 0.65 threshold (0.670)**. Enriched source columns (DashPass status, app sessions, fee discounts, channel/category profiles, subscription health) split the residual "average" mass into Healthy DashPass Subscribers + Discount-Driven Restaurant Regulars.
 
 ## Runs to date
 
@@ -60,6 +60,7 @@ See [`samples/run_6_explicit_scope/`](samples/run_6_explicit_scope/) for the lat
 | #2 | prefilter Active, exclude demo+lifestage from embedding, k∈[4,8] | 7 | 0.439 | Niche personas clean (grocery, app-uninstallers, Caviar); 53% mass remains |
 | #5 | run #2 config + baseline in prompts + auto-naming + full feature snapshot | 7 | 0.439 | Every persona named; prompts now self-contained with reference frame |
 | #6 | run #5 + explicit baseline scope label + per-persona profiles for fixed lifestage segments | 7 | 0.439 | Baseline scope unambiguous; FIXED_* personas now have their own snapshots |
+| #9 | enriched source: +DashPass, app sessions, fee discounts, channel/category JSON profiles, subscription health, goto-mx score | 7 | **0.670** | Stability passes threshold; residual mass splits into Healthy DashPass Subscriber (36%) + Discount-Driven Restaurant Regular (40%) |
 
 ## Follow-ups
 

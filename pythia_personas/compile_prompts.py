@@ -20,8 +20,15 @@ from typing import Iterable
 _NAMING_RULES = [
     # (predicate over deltas dict, name, description, jtbd)
     (
-        lambda d: d.get("region_name_australia_oh", 0) > 1.0
-                  or d.get("country_id_5_oh", 0) > 1.0,
+        lambda d: d.get("notification_reachability_status_unk_oh", 0) > 0.5
+                  or d.get("notification_reachability_profile_unk_oh", 0) > 0.5,
+        "Unreachable Disengaged User",
+        "Active orderer but unreachable via notifications — profile flagged UNK on reach status. Engagement happens through direct app use, not marketing. Lower order frequency and fewer NV orders than baseline.",
+        "Order on DoorDash without marketing pull; surfaces only when the user comes to the app directly.",
+    ),
+    (
+        lambda d: d.get("region_name_australia_oh", 0) > 0.5
+                  or d.get("country_name_australia_oh", 0) > 0.5,
         "Australia Cohort",
         "Australian DoorDash user. Category mix and notification reachability differ from the US baseline; grocery is a larger share of demand in this market.",
         "Get household and grocery essentials via DoorDash in a market with fewer restaurant alternatives.",
@@ -39,6 +46,46 @@ _NAMING_RULES = [
         "Notification-Fatigued Engaged User",
         "Orders regularly but marketing volume exceeds tolerance. Uninstalls and unsubscribes spike after notification campaigns. Sensitive to push/email frequency.",
         "Order when needed; aggressively reduce promotional noise from the app and brand.",
+    ),
+    (
+        lambda d: d.get("app_session_frequency_28d", 0) > 1.0
+                  and d.get("nv_order_frequency_28d", 0) > 0.5
+                  and d.get("dashpass_status_active_oh", 0) > 0.2,
+        "DashPass Grocery Power User",
+        "DashPass subscriber with high app engagement and grocery-leaning NV orders. Treats DoorDash as an everyday grocery delivery channel; subscription justifies frequent use.",
+        "Maximize DashPass value through frequent grocery + restaurant orders.",
+    ),
+    (
+        lambda d: d.get("dashpass_status_active_oh", 0) > 0.3
+                  and d.get("health_of_subscription_jtbd", 0) > 0.3
+                  and d.get("high_fee_order_rate", 0) < 0,
+        "Healthy DashPass Subscriber",
+        "Active DashPass member where the subscription is paying off — health-of-subscription is well above baseline, fee burden is below baseline. Stable, profitable user for the marketplace.",
+        "Use DashPass as a cost-saving wrapper around regular delivery orders.",
+    ),
+    (
+        lambda d: d.get("dashpass_status_inactive_oh", 0) > 0.3
+                  and d.get("category_mix_profile__restaurant", 0) > 0.2
+                  and d.get("device_type_notif_ios_oh", 0) > 0.3,
+        "iOS Restaurant Mainstream (no DashPass)",
+        "Restaurant-heavy iOS user without DashPass. Pays full fees per order; somewhat fee-tolerant but receives more fee discounts than DashPass members. Mainstream engaged but unsubscribed.",
+        "Order restaurant delivery occasionally without committing to a subscription.",
+    ),
+    (
+        lambda d: d.get("health_of_subscription_jtbd", 0) < -0.2
+                  and d.get("avg_delivery_fee_discount", 0) > 0.2
+                  and d.get("device_type_notif_ios_oh", 0) > 0.3,
+        "Discount-Driven Restaurant Regular",
+        "Lukewarm on DashPass (low subscription health) but receives larger-than-average fee discounts; orders concentrate on restaurants via iOS. Engagement is fee-promotion sensitive — pricing changes will move this segment.",
+        "Order restaurant delivery when the fee math works out — promotions and discounts matter.",
+    ),
+    (
+        lambda d: d.get("device_footprint", 0) > 0.7
+                  and (d.get("channel_usage_mix__catering", 0) > 0.3
+                       or d.get("notification_reachability_profile_email,sm_oh", 0) > 0.3),
+        "Multi-Device Catering / Power-Channel User",
+        "Uses multiple devices and orders across non-mainstream channels (catering, multi-channel reachability). Power user pattern with broader engagement surface area than typical.",
+        "Manage household / team / business orders across devices and channels.",
     ),
     (
         lambda d: d.get("weekly_grocery_stockup_flag", 0) > 0.7
