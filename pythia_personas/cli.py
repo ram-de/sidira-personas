@@ -14,7 +14,7 @@ import yaml
 from .adapter import adapt_all
 from .calibrate import bootstrap_stability, compute_weights, profile_clusters, top_distinctive_features
 from .cluster import assign, fit_gmm_bic
-from .compile_prompts import compile_prompt, generic_fallback_name, llm_name
+from .compile_prompts import compile_prompt, generic_fallback_name, llm_name, llm_provider_in_use
 from .encoder import encode_all
 from .io import read_local, read_snowflake
 from .schema import PERSONA_PACK_SCHEMA_VERSION, FeatureDelta, Persona, PersonaPack, PersonaWeights
@@ -104,11 +104,13 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
 
     if no_llm:
         click.echo("      --no-llm flag set → all personas will use generic Persona## names")
-    elif os.environ.get("ANTHROPIC_API_KEY"):
-        click.echo("      ANTHROPIC_API_KEY detected → naming via Claude (fallback to Persona## on failure)")
     else:
-        click.secho("      ANTHROPIC_API_KEY not set → all personas will use generic Persona## names",
-                    fg="yellow")
+        provider = llm_provider_in_use()
+        if provider:
+            click.echo(f"      naming via {provider} (fallback to Persona## on failure)")
+        else:
+            click.secho("      no LLM key (GROQ_API_KEY / ANTHROPIC_API_KEY) → using Persona## names",
+                        fg="yellow")
 
     personas: list[Persona] = []
     persona_value_maps: dict[str, dict] = {}

@@ -262,58 +262,101 @@ def compile_prompt(company_id: str, persona: dict, persona_values: dict,
 
 # ---------- LLM naming (primary path) ----------
 
-def llm_name(company_id: str, persona_values: dict, top_features: list[dict]) -> tuple[str, str, str] | None:
-    """Ask Claude to name + describe a persona from its z-deltas vs. baseline.
+def _build_naming_prompt(company_id: str, persona_values: dict, top_features: list[dict]) -> str:
+    feature_lines = "\n".join(
+        f"- {f['group']}.{f['feature']}: "
+        f"persona={persona_values.get(f['feature'],{}).get('value_fmt','?')}, "
+        f"delta={f['z_delta']:+.2f}σ vs. baseline"
+        for f in top_features[:20]
+    )
+    return (
+        f"You are naming a user persona discovered via unsupervised clustering "
+        f"on a {company_id} user dataset.\n\n"
+        f"Below are the persona's distinctive features (highest absolute z-delta "
+        f"vs. the population baseline). Each line shows the feature, the "
+        f"persona's value, and how far it sits from baseline in standard "
+        f"deviations.\n\n"
+        f"{feature_lines}\n\n"
+        f"Produce a JSON object with these keys:\n"
+        f"- name (≤5 words, a behavioral label that captures what makes this "
+        f"persona distinct — NOT a demographic label unless demographics are "
+        f"the only strong signal)\n"
+        f"- description (1 sentence, ~25 words, naming the 2–3 strongest "
+        f"signals in plain language)\n"
+        f"- jtbd (1 sentence, written as a 'job to be done' from the "
+        f"persona's first-person motivation perspective)\n\n"
+        f"Output JSON only — no prose, no code fences."
+    )
 
-    Returns None on any failure (no API key, import error, network error, parse
-    error). The caller must fall back to `generic_fallback_name`.
 
-    Company-agnostic: the LLM sees only the company_id, feature names, and
-    persona values + baseline-relative z-scores. Works on any feature schema.
-    """
+def _parse_naming_json(text: str) -> tuple[str, str, str]:
+    import json as _json
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)[1]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip()
+    obj = _json.loads(text)
+    return obj["name"], obj["description"], obj["jtbd"]
+
+
+def _llm_name_groq(prompt: str) -> tuple[str, str, str] | None:
+    key = os.environ.get("GROQ_API_KEY")
+    if not key:
+        return None
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
+        model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        resp = client.chat.completions.create(
+            model=model,
+            max_tokens=400,
+            response_format={"type": "json_object"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return _parse_naming_json(resp.choices[0].message.content)
+    except Exception:
+        return None
+
+
+def _llm_name_anthropic(prompt: str) -> tuple[str, str, str] | None:
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         return None
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=key)
-        feature_lines = "\n".join(
-            f"- {f['group']}.{f['feature']}: "
-            f"persona={persona_values.get(f['feature'],{}).get('value_fmt','?')}, "
-            f"delta={f['z_delta']:+.2f}σ vs. baseline"
-            for f in top_features[:20]
-        )
-        prompt = (
-            f"You are naming a user persona discovered via unsupervised clustering "
-            f"on a {company_id} user dataset.\n\n"
-            f"Below is the persona's distinctive features (highest absolute z-delta "
-            f"vs. the population baseline). Each line shows the feature, the "
-            f"persona's value, and how far it sits from baseline in standard "
-            f"deviations.\n\n"
-            f"{feature_lines}\n\n"
-            f"Produce a JSON object with these keys:\n"
-            f"- name (≤5 words, a behavioral label that captures what makes this "
-            f"persona distinct — NOT a demographic label unless demographics are "
-            f"the only strong signal)\n"
-            f"- description (1 sentence, ~25 words, naming the 2–3 strongest "
-            f"signals in plain language)\n"
-            f"- jtbd (1 sentence, written as a 'job to be done' from the "
-            f"persona's first-person motivation perspective)\n\n"
-            f"Output JSON only — no prose, no code fences."
-        )
         msg = client.messages.create(
-            model="claude-sonnet-4-6",
+            model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
             max_tokens=400,
             messages=[{"role": "user", "content": prompt}],
         )
-        import json as _json
-        text = msg.content[0].text.strip()
-        if text.startswith("```"):
-            text = text.split("```", 2)[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
-        obj = _json.loads(text)
-        return obj["name"], obj["description"], obj["jtbd"]
+        return _parse_naming_json(msg.content[0].text)
     except Exception:
         return None
+
+
+def llm_name(company_id: str, persona_values: dict, top_features: list[dict]) -> tuple[str, str, str] | None:
+    """Ask an LLM to name + describe a persona from its z-deltas vs. baseline.
+
+    Provider preference (first available wins): Groq → Anthropic.
+    Returns None on any failure; caller must fall back to `generic_fallback_name`.
+
+    Company-agnostic: the LLM sees only company_id, feature names, persona values,
+    and baseline-relative z-scores. Works on any feature schema.
+    """
+    prompt = _build_naming_prompt(company_id, persona_values, top_features)
+    result = _llm_name_groq(prompt)
+    if result is not None:
+        return result
+    return _llm_name_anthropic(prompt)
+
+
+def llm_provider_in_use() -> str | None:
+    """Used by the CLI to print which provider it picked up. None = fallback path."""
+    if os.environ.get("GROQ_API_KEY"):
+        return f"groq:{os.environ.get('GROQ_MODEL', 'llama-3.3-70b-versatile')}"
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return f"anthropic:{os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-6')}"
+    return None

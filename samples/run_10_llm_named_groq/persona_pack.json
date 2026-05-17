@@ -1,8 +1,8 @@
 {
   "schema_version": "1.0",
   "company_id": "doordash",
-  "run_id": "dd-20260517T152631",
-  "created_at": "2026-05-17T15:26:50.185872",
+  "run_id": "dd-20260517T162638",
+  "created_at": "2026-05-17T16:27:04.655377",
   "n_users": 8823,
   "feature_groups": [
     "demographic_identity",
@@ -16,9 +16,9 @@
   "personas": [
     {
       "id": "P01",
-      "name": "Australia Cohort",
-      "description": "Australian DoorDash user. Category mix and notification reachability differ from the US baseline; grocery is a larger share of demand in this market.",
-      "jtbd": "Get household and grocery essentials via DoorDash in a market with fewer restaurant alternatives.",
+      "name": "Grocery Stocker",
+      "description": "Orders grocery, frequently, with high mobile engagement",
+      "jtbd": "I need to restock my pantry and fridge quickly and easily using my phone",
       "size": 408,
       "weights": {
         "by_headcount": 0.046242774566473986,
@@ -231,9 +231,9 @@
     },
     {
       "id": "P02",
-      "name": "Caviar SMS Loyalist",
-      "description": "Orders on the Caviar brand surface (not core DoorDash). SMS-reachable, not push-heavy. Expectations of restaurant quality and brand tone differ from mainstream DD users.",
-      "jtbd": "Order from premium/curated restaurants on a brand they trust, with low promotional noise.",
+      "name": "Infrequent SMS Users",
+      "description": "Rarely orders, highly reachable via SMS, and frequently unsubscribes from notifications",
+      "jtbd": "I need to easily get food delivered without constant reminders, using SMS to stay informed",
       "size": 154,
       "weights": {
         "by_headcount": 0.017454380596169102,
@@ -464,9 +464,9 @@
     },
     {
       "id": "P03",
-      "name": "Healthy DashPass Subscriber",
-      "description": "Active DashPass member where the subscription is paying off \u2014 health-of-subscription is well above baseline, fee burden is below baseline. Stable, profitable user for the marketplace.",
-      "jtbd": "Use DashPass as a cost-saving wrapper around regular delivery orders.",
+      "name": "Health Focused Dashpass",
+      "description": "Seeks health benefits, values Dashpass, and avoids high fees",
+      "jtbd": "I need a convenient food delivery service that supports my healthy lifestyle without breaking the bank",
       "size": 3208,
       "weights": {
         "by_headcount": 0.36359514904227586,
@@ -580,9 +580,9 @@
     },
     {
       "id": "P04",
-      "name": "Notification-Fatigued Engaged User",
-      "description": "Orders regularly but marketing volume exceeds tolerance. Uninstalls and unsubscribes spike after notification campaigns. Sensitive to push/email frequency.",
-      "jtbd": "Order when needed; aggressively reduce promotional noise from the app and brand.",
+      "name": "Frequent App User",
+      "description": "Frequent app sessions, high uninstalls after notifications, and large out-of-pocket spending",
+      "jtbd": "I need to quickly and affordably order food despite frequent app frustrations",
       "size": 238,
       "weights": {
         "by_headcount": 0.02697495183044316,
@@ -795,9 +795,9 @@
     },
     {
       "id": "P05",
-      "name": "DashPass Grocery Power User",
-      "description": "DashPass subscriber with high app engagement and grocery-leaning NV orders. Treats DoorDash as an everyday grocery delivery channel; subscription justifies frequent use.",
-      "jtbd": "Maximize DashPass value through frequent grocery + restaurant orders.",
+      "name": "Frequent Foodie",
+      "description": "High app session frequency, weekly grocery stockup, and seeking DashPass value",
+      "jtbd": "I need a convenient and affordable way to order food and groceries regularly, with perks that make my subscription worthwhile",
       "size": 342,
       "weights": {
         "by_headcount": 0.03876232573954437,
@@ -1046,9 +1046,9 @@
     },
     {
       "id": "P06",
-      "name": "Discount-Driven Restaurant Regular",
-      "description": "Lukewarm on DashPass (low subscription health) but receives larger-than-average fee discounts; orders concentrate on restaurants via iOS. Engagement is fee-promotion sensitive \u2014 pricing changes will move this segment.",
-      "jtbd": "Order restaurant delivery when the fee math works out \u2014 promotions and discounts matter.",
+      "name": "Frugal Foodies",
+      "description": "Seeks grocery stockups, resents high fees, and values delivery discounts",
+      "jtbd": "I need to stock up on groceries and snacks without breaking the bank on fees and delivery costs",
       "size": 3531,
       "weights": {
         "by_headcount": 0.40020401224073443,
@@ -1135,9 +1135,9 @@
     },
     {
       "id": "P07",
-      "name": "Unreachable Disengaged User",
-      "description": "Active orderer but unreachable via notifications \u2014 profile flagged UNK on reach status. Engagement happens through direct app use, not marketing. Lower order frequency and fewer NV orders than baseline.",
-      "jtbd": "Order on DoorDash without marketing pull; surfaces only when the user comes to the app directly.",
+      "name": "Frequent Restaurant User",
+      "description": "High restaurant category mix, low grocery usage, and reminder notification behavior",
+      "jtbd": "I need to easily order food from my favorite restaurants using reminders to stay on track with my busy schedule",
       "size": 942,
       "weights": {
         "by_headcount": 0.10676640598435906,
@@ -1359,9 +1359,9 @@
     },
     {
       "id": "FIXED_DORMANT_RESURRECTE",
-      "name": "Fixed \u2014 Dormant Resurrected",
-      "description": "Pre-defined lifestage segment: Dormant Resurrected. NOT discovered via clustering \u2014 assigned by lifestage rule.",
-      "jtbd": "Lifestage-derived; behaviorally similar to Active users in residual dimensions, but at a different point in the consumer lifecycle.",
+      "name": "Rarely Churns",
+      "description": "This persona rarely churns, quickly resurrects, and never unsubscribes from devices or channels",
+      "jtbd": "I need a seamless, uninterrupted food delivery experience that keeps me engaged and coming back for more",
       "size": 794,
       "weights": {
         "by_headcount": 0.0794,
@@ -1511,9 +1511,9 @@
     },
     {
       "id": "FIXED_CHURNED_RESURRECTE",
-      "name": "Fixed \u2014 Churned Resurrected",
-      "description": "Pre-defined lifestage segment: Churned Resurrected. NOT discovered via clustering \u2014 assigned by lifestage rule.",
-      "jtbd": "Lifestage-derived; behaviorally similar to Active users in residual dimensions, but at a different point in the consumer lifecycle.",
+      "name": "Resurrected High Churner",
+      "description": "Frequently churns, has high session frequency, and always resurrects",
+      "jtbd": "I need a food delivery service that can win me back after I've stopped using it, so I can still get my favorite food whenever I want it",
       "size": 258,
       "weights": {
         "by_headcount": 0.0258,
@@ -1663,9 +1663,9 @@
     },
     {
       "id": "FIXED_NEW_CX",
-      "name": "Fixed \u2014 New Cx",
-      "description": "Pre-defined lifestage segment: New Cx. NOT discovered via clustering \u2014 assigned by lifestage rule.",
-      "jtbd": "Lifestage-derived; behaviorally similar to Active users in residual dimensions, but at a different point in the consumer lifecycle.",
+      "name": "Loyal New Users",
+      "description": "New consumers with high loyalty, frequent link clicks, and retail motivations",
+      "jtbd": "I need to seamlessly discover and order from my favorite retail brands through convenient channels",
       "size": 125,
       "weights": {
         "by_headcount": 0.0125,

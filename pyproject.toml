@@ -18,6 +18,7 @@ dependencies = [
     "click>=8.1",
     "hdbscan>=0.8.33",
     "anthropic>=0.25",
+    "openai>=1.30",
 ]
 
 [project.optional-dependencies]
