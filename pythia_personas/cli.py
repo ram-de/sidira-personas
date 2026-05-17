@@ -14,7 +14,7 @@ import yaml
 from .adapter import adapt_all
 from .calibrate import bootstrap_stability, compute_weights, profile_clusters, top_distinctive_features
 from .cluster import assign, fit_gmm_bic
-from .compile_prompts import auto_name, compile_prompt, llm_polish_name
+from .compile_prompts import compile_prompt, generic_fallback_name, llm_name
 from .encoder import encode_all
 from .io import read_local, read_snowflake
 from .schema import PERSONA_PACK_SCHEMA_VERSION, FeatureDelta, Persona, PersonaPack, PersonaWeights
@@ -29,7 +29,9 @@ def cli() -> None:
 @click.option("--config", "config_path", required=True, type=click.Path(exists=True))
 @click.option("--out", "out_dir", default="outputs", type=click.Path())
 @click.option("--limit", default=None, type=int, help="Optional row cap for fast iteration.")
-def run(config_path: str, out_dir: str, limit: int | None) -> None:
+@click.option("--no-llm", is_flag=True, default=False,
+              help="Skip LLM naming entirely; use generic Persona01/02… fallback for every persona.")
+def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None:
     cfg = yaml.safe_load(Path(config_path).read_text())
     run_id = f"{cfg.get('run_id_prefix', 'run')}-{dt.datetime.utcnow().strftime('%Y%m%dT%H%M%S')}"
     out = Path(out_dir) / run_id
@@ -100,6 +102,14 @@ def run(config_path: str, out_dir: str, limit: int | None) -> None:
     profile = profile_clusters(df, groups, labels)
     baseline = profile["baseline"]
 
+    if no_llm:
+        click.echo("      --no-llm flag set → all personas will use generic Persona## names")
+    elif os.environ.get("ANTHROPIC_API_KEY"):
+        click.echo("      ANTHROPIC_API_KEY detected → naming via Claude (fallback to Persona## on failure)")
+    else:
+        click.secho("      ANTHROPIC_API_KEY not set → all personas will use generic Persona## names",
+                    fg="yellow")
+
     personas: list[Persona] = []
     persona_value_maps: dict[str, dict] = {}
     for cid in sorted(set(labels.tolist())):
@@ -111,10 +121,11 @@ def run(config_path: str, out_dir: str, limit: int | None) -> None:
         pid = f"P{cid+1:02d}"
         pvals = profile["clusters"][int(cid)]
 
-        # Naming: try LLM polish first, fall back to deterministic
-        named = llm_polish_name(pvals, feats)
+        # Naming: LLM is primary. Falls back to generic Persona## if LLM
+        # is unavailable (no key, network error, etc.) or --no-llm is set.
+        named = None if no_llm else llm_name(cfg["company_id"], pvals, feats)
         if named is None:
-            named = auto_name(pvals, feats)
+            named = generic_fallback_name(pid, feats)
         name, desc, jtbd = named
 
         persona = Persona(
@@ -171,11 +182,19 @@ def run(config_path: str, out_dir: str, limit: int | None) -> None:
                 tot_all = float(pd.concat([df, excluded_df])[orders_col].sum()) or 1.0
                 w["by_orders"] = float(sub[orders_col].sum() / tot_all)
             persona_id = cid_label[:24]
+            fixed_named = None if no_llm else llm_name(cfg["company_id"], pvals, tf_candidates)
+            if fixed_named is None:
+                fixed_named = (
+                    f"Fixed — {fixed_val}",
+                    f"Pre-defined segment from prefilter column {pre['column']} = {fixed_val}. NOT discovered via clustering.",
+                    "(not generated — LLM unavailable)",
+                )
+            f_name, f_desc, f_jtbd = fixed_named
             personas.append(Persona(
                 id=persona_id,
-                name=f"Fixed — {fixed_val}",
-                description=f"Pre-defined lifestage segment: {fixed_val}. NOT discovered via clustering — assigned by lifestage rule.",
-                jtbd="Lifestage-derived; behaviorally similar to Active users in residual dimensions, but at a different point in the consumer lifecycle.",
+                name=f_name,
+                description=f_desc,
+                jtbd=f_jtbd,
                 size=int(len(sub)),
                 weights=PersonaWeights(**w),
                 stability=1.0,

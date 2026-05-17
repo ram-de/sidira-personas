@@ -1,23 +1,28 @@
 """Layer E — Compile a persona profile into an LLM-ready system prompt.
 
 The prompt has three sections:
-  1. Persona summary (auto-generated name + description + JTBD)
+  1. Persona summary (LLM-generated name + description + JTBD)
   2. Baseline — what the average {company} user looks like (reference frame)
   3. Your profile — distinctive deltas + full populated feature snapshot
 
-Deterministic naming: chooses a short tag from the persona's strongest
-behavioral signals. Optional LLM polish via Anthropic if ANTHROPIC_API_KEY set.
+## Naming strategy (company-agnostic)
+
+Primary path: call Claude with the persona's z-deltas + feature values, get back
+{name, description, jtbd}. This works on any company / any feature set because
+the LLM reads the feature names and values directly — no per-company rules.
+
+Fallback path (LLM unreachable, no API key, or API error): emit a generic
+"Persona NN" name with a description listing the top-3 distinctive features.
+The pipeline NEVER hangs on the LLM call; failures are silent.
 """
 from __future__ import annotations
 
 import os
 from typing import Iterable
 
-# ---------- Deterministic naming ----------
-
-# Rules fire on z-deltas (vs population baseline), NOT absolute values.
-# Order matters — first match wins. Put most specific niches at the top.
-_NAMING_RULES = [
+# Hard-coded company-specific rules have been removed (2026-05-17).
+# Naming is now LLM-driven with a generic numeric fallback.
+_REMOVED_NAMING_RULES: list = [
     # (predicate over deltas dict, name, description, jtbd)
     (
         lambda d: d.get("notification_reachability_status_unk_oh", 0) > 0.5
@@ -138,44 +143,26 @@ _FALLBACK = (
 )
 
 
-def auto_name(persona_values: dict, top_features: list[dict]) -> tuple[str, str, str]:
-    """Pick a name from the persona's z-deltas (top_features) vs. baseline.
+def generic_fallback_name(persona_id: str, top_features: list[dict]) -> tuple[str, str, str]:
+    """Company-agnostic fallback used when the LLM is unavailable.
 
-    Builds a delta dict keyed by feature name (raw + one-hot keys with `_oh` suffix
-    to distinguish category-membership signals).
+    Names are numeric (Persona01, Persona02 …). Description lists the top 3
+    distinctive features so the LLM downstream can still reason from the deltas.
     """
-    deltas: dict = {}
-    for tf in top_features:
-        feat = tf["feature"]
-        deltas[feat] = tf["z_delta"]
-        # tag one-hot expansions for cleaner predicates
-        if "_" in feat and feat.split("_")[0] in {"region", "country", "consumer", "notification", "device"}:
-            deltas[feat.lower() + "_oh"] = tf["z_delta"]
-    # also expose categorical OH names lowercased
-    for feat in list(deltas.keys()):
-        if feat.endswith("_oh"):
-            continue
-        deltas[feat.lower() + "_oh"] = deltas[feat]
-
-    for predicate, name, desc, jtbd in _NAMING_RULES:
-        try:
-            if predicate(deltas):
-                return name, desc, jtbd
-        except Exception:
-            continue
-
-    # Fallback: differentiate by strongest signed delta so the same fallback
-    # name doesn't collide across multiple residual clusters.
+    name = f"Persona{persona_id.lstrip('P').zfill(2)}" if persona_id.startswith("P") else persona_id
     if top_features:
-        strongest = max(top_features, key=lambda f: abs(f["z_delta"]))
-        sign = "high" if strongest["z_delta"] > 0 else "low"
-        feat_short = strongest["feature"].split("__")[-1].replace("_", " ").title()[:30]
-        suffix = f" — {sign} {feat_short}"
-        name = _FALLBACK[0] + suffix
-        desc = (_FALLBACK[1] + f" Most distinctive: {strongest['group']}.{strongest['feature']} "
-                f"({'+' if strongest['z_delta'] >= 0 else ''}{strongest['z_delta']:.2f}σ).")
-        return name, desc, _FALLBACK[2]
-    return _FALLBACK
+        bullets = []
+        for f in top_features[:3]:
+            sign = "+" if f["z_delta"] >= 0 else ""
+            bullets.append(f"{f['group']}.{f['feature']} ({sign}{f['z_delta']:.2f}σ)")
+        desc = (
+            "Discovered cluster — LLM naming unavailable. "
+            "Top distinctive features vs. baseline: " + "; ".join(bullets) + "."
+        )
+    else:
+        desc = "Discovered cluster — LLM naming unavailable; no strongly distinctive features."
+    jtbd = "(not generated — LLM unavailable)"
+    return name, desc, jtbd
 
 
 # ---------- Prompt template ----------
@@ -273,10 +260,17 @@ def compile_prompt(company_id: str, persona: dict, persona_values: dict,
     )
 
 
-# ---------- Optional LLM polish ----------
+# ---------- LLM naming (primary path) ----------
 
-def llm_polish_name(persona_values: dict, top_features: list[dict]) -> tuple[str, str, str] | None:
-    """If ANTHROPIC_API_KEY is set, ask Claude for a name/desc/JTBD. Returns None on any failure."""
+def llm_name(company_id: str, persona_values: dict, top_features: list[dict]) -> tuple[str, str, str] | None:
+    """Ask Claude to name + describe a persona from its z-deltas vs. baseline.
+
+    Returns None on any failure (no API key, import error, network error, parse
+    error). The caller must fall back to `generic_fallback_name`.
+
+    Company-agnostic: the LLM sees only the company_id, feature names, and
+    persona values + baseline-relative z-scores. Works on any feature schema.
+    """
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         return None
@@ -284,30 +278,41 @@ def llm_polish_name(persona_values: dict, top_features: list[dict]) -> tuple[str
         import anthropic
         client = anthropic.Anthropic(api_key=key)
         feature_lines = "\n".join(
-            f"- {f['group']}.{f['feature']}: persona={persona_values.get(f['feature'],{}).get('value_fmt','?')}, "
-            f"delta={f['z_delta']:+.2f}σ"
-            for f in top_features[:15]
+            f"- {f['group']}.{f['feature']}: "
+            f"persona={persona_values.get(f['feature'],{}).get('value_fmt','?')}, "
+            f"delta={f['z_delta']:+.2f}σ vs. baseline"
+            for f in top_features[:20]
+        )
+        prompt = (
+            f"You are naming a user persona discovered via unsupervised clustering "
+            f"on a {company_id} user dataset.\n\n"
+            f"Below is the persona's distinctive features (highest absolute z-delta "
+            f"vs. the population baseline). Each line shows the feature, the "
+            f"persona's value, and how far it sits from baseline in standard "
+            f"deviations.\n\n"
+            f"{feature_lines}\n\n"
+            f"Produce a JSON object with these keys:\n"
+            f"- name (≤5 words, a behavioral label that captures what makes this "
+            f"persona distinct — NOT a demographic label unless demographics are "
+            f"the only strong signal)\n"
+            f"- description (1 sentence, ~25 words, naming the 2–3 strongest "
+            f"signals in plain language)\n"
+            f"- jtbd (1 sentence, written as a 'job to be done' from the "
+            f"persona's first-person motivation perspective)\n\n"
+            f"Output JSON only — no prose, no code fences."
         )
         msg = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=400,
-            messages=[{
-                "role": "user",
-                "content": (
-                    "Given this DoorDash user persona's distinctive features (vs population), "
-                    "produce a JSON object with keys: name (≤5 words), description (1 sentence), "
-                    "jtbd (one short sentence, 'Job to be done' phrasing). No prose, just JSON.\n\n"
-                    f"{feature_lines}"
-                ),
-            }],
+            messages=[{"role": "user", "content": prompt}],
         )
         import json as _json
         text = msg.content[0].text.strip()
-        # tolerate fenced code
         if text.startswith("```"):
-            text = text.split("```")[1]
+            text = text.split("```", 2)[1]
             if text.startswith("json"):
                 text = text[4:]
+            text = text.strip()
         obj = _json.loads(text)
         return obj["name"], obj["description"], obj["jtbd"]
     except Exception:
