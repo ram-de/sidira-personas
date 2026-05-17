@@ -142,8 +142,11 @@ PROMPT_TEMPLATE = """# You are a {company_id} user. Reason and respond from this
 
 ---
 
-## Baseline — Average {company_id} user
-For reference, the typical user in this population looks like:
+## Baseline — reference population
+
+**Scope:** {baseline_scope}
+
+The "baseline" values below are the AVERAGE of the {baseline_n:,}-user reference set. They are NOT industry averages and NOT the average across all {company_id} users globally — they describe ONLY this sample.
 
 {baseline_block}
 
@@ -207,12 +210,16 @@ def _format_full_block(persona_values: dict, baseline: dict) -> str:
 
 
 def compile_prompt(company_id: str, persona: dict, persona_values: dict,
-                   baseline: dict, top_features: Iterable[dict]) -> str:
+                   baseline: dict, top_features: Iterable[dict],
+                   baseline_scope: str = "all users in the analyzed sample",
+                   baseline_n: int = 0) -> str:
     return PROMPT_TEMPLATE.format(
         company_id=company_id,
         name=persona["name"],
         description=persona["description"],
         jtbd=persona["jtbd"],
+        baseline_scope=baseline_scope,
+        baseline_n=baseline_n,
         baseline_block=_format_baseline_block(baseline),
         distinctive_block=_format_distinctive_block(top_features, persona_values, baseline),
         full_block=_format_full_block(persona_values, baseline),

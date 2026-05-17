@@ -1,8 +1,8 @@
 {
   "schema_version": "1.0",
   "company_id": "doordash",
-  "run_id": "dd-20260517T142702",
-  "created_at": "2026-05-17T14:27:15.211692",
+  "run_id": "dd-20260517T143249",
+  "created_at": "2026-05-17T14:33:02.070188",
   "n_users": 8823,
   "feature_groups": [
     "demographic_identity",
@@ -854,25 +854,10 @@
       }
     },
     {
-      "id": "FIXED_CHURNED_RESURRECTE",
-      "name": "Fixed \u2014 Churned Resurrected",
-      "description": "Pre-defined lifestage segment: Churned Resurrected",
-      "jtbd": "(lifestage-derived; not behavioral)",
-      "size": 258,
-      "weights": {
-        "by_headcount": 0.0258,
-        "by_orders": 0.004573482609320215,
-        "by_revenue": null
-      },
-      "stability": 1.0,
-      "top_features": [],
-      "centroid": {}
-    },
-    {
       "id": "FIXED_DORMANT_RESURRECTE",
       "name": "Fixed \u2014 Dormant Resurrected",
-      "description": "Pre-defined lifestage segment: Dormant Resurrected",
-      "jtbd": "(lifestage-derived; not behavioral)",
+      "description": "Pre-defined lifestage segment: Dormant Resurrected. NOT discovered via clustering \u2014 assigned by lifestage rule.",
+      "jtbd": "Lifestage-derived; behaviorally similar to Active users in residual dimensions, but at a different point in the consumer lifecycle.",
       "size": 794,
       "weights": {
         "by_headcount": 0.0794,
@@ -880,14 +865,303 @@
         "by_revenue": null
       },
       "stability": 1.0,
-      "top_features": [],
-      "centroid": {}
+      "top_features": [
+        {
+          "feature": "churned_90d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 0.02392947103274559,
+          "population_mean": 0.008160489629377763,
+          "population_std": 0.008160489629377763,
+          "z_delta": 1.9323572628043655
+        },
+        {
+          "feature": "device_unsubscribe_within_24h",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.0014371209068010078,
+          "population_mean": 0.0005394416969147005,
+          "population_std": 0.0005394416969147005,
+          "z_delta": 1.6640894002457012
+        },
+        {
+          "feature": "new_consumer_90d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 0.03904282115869018,
+          "population_mean": 0.01722770032868639,
+          "population_std": 0.01722770032868639,
+          "z_delta": 1.266281651862654
+        },
+        {
+          "feature": "dormant_resurrected_28d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 1.0,
+          "population_mean": 0.0,
+          "population_std": 1.0,
+          "z_delta": 1.0
+        },
+        {
+          "feature": "notification_unsubscribe_rate",
+          "group": "pain_points_friction",
+          "centroid_value": 2.171410579345088e-05,
+          "population_mean": 0.0001966396324863884,
+          "population_std": 0.0001966396324863884,
+          "z_delta": -0.8895741132197551
+        },
+        {
+          "feature": "unsubscribe_within_24h",
+          "group": "channel_tech_behavior",
+          "centroid_value": 2.171410579345088e-05,
+          "population_mean": 0.0001966396324863884,
+          "population_std": 0.0001966396324863884,
+          "z_delta": -0.8895741132197551
+        },
+        {
+          "feature": "nv_order_frequency_28d",
+          "group": "behavioral_patterns",
+          "centroid_value": 0.17002518891687657,
+          "population_mean": 1.0253881899580641,
+          "population_std": 1.0253881899580641,
+          "z_delta": -0.8341845648487232
+        },
+        {
+          "feature": "order_frequency_90d",
+          "group": "behavioral_patterns",
+          "centroid_value": 8.954659949622167,
+          "population_mean": 46.625750878386036,
+          "population_std": 46.625750878386036,
+          "z_delta": -0.8079460431001184
+        },
+        {
+          "feature": "active_90d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 7.345088161209068,
+          "population_mean": 31.964411198005212,
+          "population_std": 31.964411198005212,
+          "z_delta": -0.7702104344826021
+        },
+        {
+          "feature": "active_28d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 2.5906801007556677,
+          "population_mean": 10.988779326759605,
+          "population_std": 10.988779326759605,
+          "z_delta": -0.7642431407784387
+        },
+        {
+          "feature": "total_orders_lifetime",
+          "group": "behavioral_patterns",
+          "centroid_value": 109.20025188916877,
+          "population_mean": 430.68162756432054,
+          "population_std": 430.68162756432054,
+          "z_delta": -0.7464478517304289
+        },
+        {
+          "feature": "order_frequency_28d",
+          "group": "behavioral_patterns",
+          "centroid_value": 4.287153652392947,
+          "population_mean": 16.551173070384223,
+          "population_std": 16.551173070384223,
+          "z_delta": -0.7409758429712666
+        },
+        {
+          "feature": "promo_triggered_order_share",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.09373209787835941,
+          "population_mean": 0.27088947122509494,
+          "population_std": 0.27088947122509494,
+          "z_delta": -0.6539839756249776
+        },
+        {
+          "feature": "order_within_24h",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.09373211083123426,
+          "population_mean": 0.270889471415608,
+          "population_std": 0.270889471415608,
+          "z_delta": -0.6539839280522379
+        },
+        {
+          "feature": "avg_days_between_orders",
+          "group": "behavioral_patterns",
+          "centroid_value": 6.973551637279597,
+          "population_mean": 4.239714382862972,
+          "population_std": 4.239714382862972,
+          "z_delta": 0.6448163738262326
+        }
+      ],
+      "centroid": {
+        "churned_90d_agg": 0.02392947103274559,
+        "device_unsubscribe_within_24h": 0.0014371209068010078,
+        "new_consumer_90d_agg": 0.03904282115869018,
+        "dormant_resurrected_28d_agg": 1.0,
+        "notification_unsubscribe_rate": 2.171410579345088e-05,
+        "unsubscribe_within_24h": 2.171410579345088e-05,
+        "nv_order_frequency_28d": 0.17002518891687657,
+        "order_frequency_90d": 8.954659949622167,
+        "active_90d_agg": 7.345088161209068,
+        "active_28d_agg": 2.5906801007556677,
+        "total_orders_lifetime": 109.20025188916877,
+        "order_frequency_28d": 4.287153652392947,
+        "promo_triggered_order_share": 0.09373209787835941,
+        "order_within_24h": 0.09373211083123426,
+        "avg_days_between_orders": 6.973551637279597
+      }
+    },
+    {
+      "id": "FIXED_CHURNED_RESURRECTE",
+      "name": "Fixed \u2014 Churned Resurrected",
+      "description": "Pre-defined lifestage segment: Churned Resurrected. NOT discovered via clustering \u2014 assigned by lifestage rule.",
+      "jtbd": "Lifestage-derived; behaviorally similar to Active users in residual dimensions, but at a different point in the consumer lifecycle.",
+      "size": 258,
+      "weights": {
+        "by_headcount": 0.0258,
+        "by_orders": 0.004573482609320215,
+        "by_revenue": null
+      },
+      "stability": 1.0,
+      "top_features": [
+        {
+          "feature": "churned_90d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 0.5,
+          "population_mean": 0.008160489629377763,
+          "population_std": 0.008160489629377763,
+          "z_delta": 60.27083333333333
+        },
+        {
+          "feature": "churned_resurrected_28d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 1.0,
+          "population_mean": 0.0,
+          "population_std": 1.0,
+          "z_delta": 1.0
+        },
+        {
+          "feature": "new_consumer_90d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 0.0,
+          "population_mean": 0.01722770032868639,
+          "population_std": 0.01722770032868639,
+          "z_delta": -1.0
+        },
+        {
+          "feature": "active_90d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 3.0426356589147288,
+          "population_mean": 31.964411198005212,
+          "population_std": 31.964411198005212,
+          "z_delta": -0.9048117720652833
+        },
+        {
+          "feature": "order_frequency_90d",
+          "group": "behavioral_patterns",
+          "centroid_value": 5.015503875968992,
+          "population_mean": 46.625750878386036,
+          "population_std": 46.625750878386036,
+          "z_delta": -0.8924306036582459
+        },
+        {
+          "feature": "total_orders_lifetime",
+          "group": "behavioral_patterns",
+          "centroid_value": 69.22868217054264,
+          "population_mean": 430.68162756432054,
+          "population_std": 430.68162756432054,
+          "z_delta": -0.8392578699907425
+        },
+        {
+          "feature": "nv_order_frequency_28d",
+          "group": "behavioral_patterns",
+          "centroid_value": 0.22093023255813954,
+          "population_mean": 1.0253881899580641,
+          "population_std": 1.0253881899580641,
+          "z_delta": -0.7845399091565751
+        },
+        {
+          "feature": "promo_dependency_score",
+          "group": "pain_points_friction",
+          "centroid_value": 0.03549019262985576,
+          "population_mean": 0.02016005570505407,
+          "population_std": 0.02016005570505407,
+          "z_delta": 0.7604213574151221
+        },
+        {
+          "feature": "active_28d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 3.0426356589147288,
+          "population_mean": 10.988779326759605,
+          "population_std": 10.988779326759605,
+          "z_delta": -0.7231143179383558
+        },
+        {
+          "feature": "order_frequency_28d",
+          "group": "behavioral_patterns",
+          "centroid_value": 5.011627906976744,
+          "population_mean": 16.551173070384223,
+          "population_std": 16.551173070384223,
+          "z_delta": -0.6972040661006511
+        },
+        {
+          "feature": "num_notifications_weekly",
+          "group": "channel_tech_behavior",
+          "centroid_value": 113.47286821705427,
+          "population_mean": 325.2698502722323,
+          "population_std": 325.2698502722323,
+          "z_delta": -0.6511423726420265
+        },
+        {
+          "feature": "avg_days_between_orders",
+          "group": "behavioral_patterns",
+          "centroid_value": 6.713178294573644,
+          "population_mean": 4.239714382862972,
+          "population_std": 4.239714382862972,
+          "z_delta": 0.5834034296528259
+        },
+        {
+          "feature": "promo_triggered_order_share",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.11470984020094394,
+          "population_mean": 0.27088947122509494,
+          "population_std": 0.27088947122509494,
+          "z_delta": -0.5765437479641795
+        },
+        {
+          "feature": "order_within_24h",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.1147098527131783,
+          "population_mean": 0.270889471415608,
+          "population_std": 0.270889471415608,
+          "z_delta": -0.5765437020725458
+        },
+        {
+          "feature": "dashpass_value_seeker",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.3060636461210434,
+          "population_mean": 0.6368330626195586,
+          "population_std": 0.6368330626195586,
+          "z_delta": -0.5193973678720815
+        }
+      ],
+      "centroid": {
+        "churned_90d_agg": 0.5,
+        "churned_resurrected_28d_agg": 1.0,
+        "new_consumer_90d_agg": 0.0,
+        "active_90d_agg": 3.0426356589147288,
+        "order_frequency_90d": 5.015503875968992,
+        "total_orders_lifetime": 69.22868217054264,
+        "nv_order_frequency_28d": 0.22093023255813954,
+        "promo_dependency_score": 0.03549019262985576,
+        "active_28d_agg": 3.0426356589147288,
+        "order_frequency_28d": 5.011627906976744,
+        "num_notifications_weekly": 113.47286821705427,
+        "avg_days_between_orders": 6.713178294573644,
+        "promo_triggered_order_share": 0.11470984020094394,
+        "order_within_24h": 0.1147098527131783,
+        "dashpass_value_seeker": 0.3060636461210434
+      }
     },
     {
       "id": "FIXED_NEW_CX",
       "name": "Fixed \u2014 New Cx",
-      "description": "Pre-defined lifestage segment: New Cx",
-      "jtbd": "(lifestage-derived; not behavioral)",
+      "description": "Pre-defined lifestage segment: New Cx. NOT discovered via clustering \u2014 assigned by lifestage rule.",
+      "jtbd": "Lifestage-derived; behaviorally similar to Active users in residual dimensions, but at a different point in the consumer lifecycle.",
       "size": 125,
       "weights": {
         "by_headcount": 0.0125,
@@ -895,8 +1169,145 @@
         "by_revenue": null
       },
       "stability": 1.0,
-      "top_features": [],
-      "centroid": {}
+      "top_features": [
+        {
+          "feature": "new_consumer_90d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 1.0,
+          "population_mean": 0.01722770032868639,
+          "population_std": 0.01722770032868639,
+          "z_delta": 57.046052631578945
+        },
+        {
+          "feature": "link_click_within_24h",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.006209688,
+          "population_mean": 0.0011155882486388383,
+          "population_std": 0.0011155882486388383,
+          "z_delta": 4.566290257697337
+        },
+        {
+          "feature": "category_motivation_profile__retail",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.02298046398046398,
+          "population_mean": 0.006587797402809569,
+          "population_std": 0.006587797402809569,
+          "z_delta": 2.488337994526555
+        },
+        {
+          "feature": "notification_unsubscribe_rate",
+          "group": "pain_points_friction",
+          "centroid_value": 0.0004,
+          "population_mean": 0.0001966396324863884,
+          "population_std": 0.0001966396324863884,
+          "z_delta": 1.0341779271159308
+        },
+        {
+          "feature": "unsubscribe_within_24h",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.0004,
+          "population_mean": 0.0001966396324863884,
+          "population_std": 0.0001966396324863884,
+          "z_delta": 1.0341779271159308
+        },
+        {
+          "feature": "promo_dependency_score",
+          "group": "pain_points_friction",
+          "centroid_value": 0.0,
+          "population_mean": 0.02016005570505407,
+          "population_std": 0.02016005570505407,
+          "z_delta": -1.0
+        },
+        {
+          "feature": "new_consumer_28d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 1.0,
+          "population_mean": 0.0,
+          "population_std": 1.0,
+          "z_delta": 1.0
+        },
+        {
+          "feature": "churned_90d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 0.0,
+          "population_mean": 0.008160489629377763,
+          "population_std": 0.008160489629377763,
+          "z_delta": -1.0
+        },
+        {
+          "feature": "total_orders_lifetime",
+          "group": "behavioral_patterns",
+          "centroid_value": 6.952,
+          "population_mean": 430.68162756432054,
+          "population_std": 430.68162756432054,
+          "z_delta": -0.9838581458900014
+        },
+        {
+          "feature": "active_90d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 3.936,
+          "population_mean": 31.964411198005212,
+          "population_std": 31.964411198005212,
+          "z_delta": -0.8768630532369815
+        },
+        {
+          "feature": "open_within_24h",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.08380339199999999,
+          "population_mean": 0.044905363089836656,
+          "population_std": 0.044905363089836656,
+          "z_delta": 0.8662223448086772
+        },
+        {
+          "feature": "order_frequency_90d",
+          "group": "behavioral_patterns",
+          "centroid_value": 6.952,
+          "population_mean": 46.625750878386036,
+          "population_std": 46.625750878386036,
+          "z_delta": -0.8508978435943497
+        },
+        {
+          "feature": "app_uninstall_after_notif",
+          "group": "pain_points_friction",
+          "centroid_value": 0.00043755199999999996,
+          "population_mean": 0.0022176652676950993,
+          "population_std": 0.0022176652676950993,
+          "z_delta": -0.8026970046499562
+        },
+        {
+          "feature": "uninstall_within_24h",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.00043755199999999996,
+          "population_mean": 0.0022176652676950993,
+          "population_std": 0.0022176652676950993,
+          "z_delta": -0.8026970046499562
+        },
+        {
+          "feature": "num_notifications_weekly",
+          "group": "channel_tech_behavior",
+          "centroid_value": 71.784,
+          "population_mean": 325.2698502722323,
+          "population_std": 325.2698502722323,
+          "z_delta": -0.7793093951378498
+        }
+      ],
+      "centroid": {
+        "new_consumer_90d_agg": 1.0,
+        "link_click_within_24h": 0.006209688,
+        "category_motivation_profile__retail": 0.02298046398046398,
+        "notification_unsubscribe_rate": 0.0004,
+        "unsubscribe_within_24h": 0.0004,
+        "promo_dependency_score": 0.0,
+        "new_consumer_28d_agg": 1.0,
+        "churned_90d_agg": 0.0,
+        "total_orders_lifetime": 6.952,
+        "active_90d_agg": 3.936,
+        "open_within_24h": 0.08380339199999999,
+        "order_frequency_90d": 6.952,
+        "app_uninstall_after_notif": 0.00043755199999999996,
+        "uninstall_within_24h": 0.00043755199999999996,
+        "num_notifications_weekly": 71.784
+      }
     }
   ],
   "cluster_method": "gmm",

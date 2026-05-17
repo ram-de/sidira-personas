@@ -50,7 +50,7 @@ v0.1 — pipeline runs end-to-end on real Snowflake data. First two runs documen
 
 ## Sample output
 
-See [`samples/run_5_with_baseline_and_names/`](samples/run_5_with_baseline_and_names/) for the latest Persona Pack (10 named personas, full prompts with population baseline, persona feature snapshot).
+See [`samples/run_6_explicit_scope/`](samples/run_6_explicit_scope/) for the latest Persona Pack (10 named personas, prompts with explicit baseline scope and fixed-persona snapshots).
 
 ## Runs to date
 
@@ -59,6 +59,7 @@ See [`samples/run_5_with_baseline_and_names/`](samples/run_5_with_baseline_and_n
 | #1 | all users, no exclusions, k∈[5,12] | 12 | 0.797 | Demographics dominate; lifestage rediscovered as clusters |
 | #2 | prefilter Active, exclude demo+lifestage from embedding, k∈[4,8] | 7 | 0.439 | Niche personas clean (grocery, app-uninstallers, Caviar); 53% mass remains |
 | #5 | run #2 config + baseline in prompts + auto-naming + full feature snapshot | 7 | 0.439 | Every persona named; prompts now self-contained with reference frame |
+| #6 | run #5 + explicit baseline scope label + per-persona profiles for fixed lifestage segments | 7 | 0.439 | Baseline scope unambiguous; FIXED_* personas now have their own snapshots |
 
 ## Follow-ups
 

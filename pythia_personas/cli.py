@@ -133,24 +133,56 @@ def run(config_path: str, out_dir: str, limit: int | None) -> None:
 
     if excluded_df is not None and len(excluded_df) > 0:
         click.echo(f"      adding {excluded_df[pre['column']].nunique()} fixed personas from prefilter")
-        for fixed_val, sub in excluded_df.groupby(pre["column"]):
+        # Build a fake-labels array over excluded_df so we can reuse profile_clusters
+        fixed_groups = list(excluded_df[pre["column"]].unique())
+        fixed_label_map = {v: i for i, v in enumerate(fixed_groups)}
+        fixed_labels = excluded_df[pre["column"]].map(fixed_label_map).to_numpy()
+        fixed_profile = profile_clusters(excluded_df.reset_index(drop=True), groups, fixed_labels)
+        # Compute distinctive features by comparing fixed-persona means to the CLUSTERING baseline
+        for fixed_val in fixed_groups:
+            cid = fixed_label_map[fixed_val]
+            sub = excluded_df[excluded_df[pre["column"]] == fixed_val]
+            pvals = fixed_profile["clusters"][cid]
+            # Build top-features by computing pseudo-z vs clustering baseline (using baseline distribution std unknown → use rank-order)
+            tf_candidates: list[dict] = []
+            for feat, info in pvals.items():
+                if feat not in baseline:
+                    continue
+                if info.get("kind") in ("count", "score", "ratio", "tenure_days"):
+                    pop_v = baseline[feat]["value"]
+                    delta = info["value"] - pop_v
+                    denom = abs(pop_v) if pop_v else 1.0
+                    z = delta / denom
+                    if abs(z) >= 0.5:
+                        tf_candidates.append({
+                            "feature": feat, "group": info["group"],
+                            "centroid_value": info["value"],
+                            "population_mean": pop_v,
+                            "population_std": denom,
+                            "z_delta": float(z),
+                        })
+            tf_candidates.sort(key=lambda x: abs(x["z_delta"]), reverse=True)
+            tf_candidates = tf_candidates[:15]
+
             cid_label = f"FIXED_{str(fixed_val).upper().replace(' ', '_')}"
             w: dict[str, float] = {"by_headcount": float(len(sub) / (len(df) + len(excluded_df)))}
             orders_col = cfg["weights"].get("orders_column")
             if orders_col and orders_col in sub.columns:
                 tot_all = float(pd.concat([df, excluded_df])[orders_col].sum()) or 1.0
                 w["by_orders"] = float(sub[orders_col].sum() / tot_all)
+            persona_id = cid_label[:24]
             personas.append(Persona(
-                id=cid_label[:24],
+                id=persona_id,
                 name=f"Fixed — {fixed_val}",
-                description=f"Pre-defined lifestage segment: {fixed_val}",
-                jtbd="(lifestage-derived; not behavioral)",
+                description=f"Pre-defined lifestage segment: {fixed_val}. NOT discovered via clustering — assigned by lifestage rule.",
+                jtbd="Lifestage-derived; behaviorally similar to Active users in residual dimensions, but at a different point in the consumer lifecycle.",
                 size=int(len(sub)),
                 weights=PersonaWeights(**w),
                 stability=1.0,
-                top_features=[],
-                centroid={},
+                top_features=[FeatureDelta(**f) for f in tf_candidates],
+                centroid={f["feature"]: f["centroid_value"] for f in tf_candidates},
             ))
+            persona_value_maps[persona_id] = pvals
 
     click.echo("[6/6] Layer E — compiling prompts + writing artifacts …")
     pack = PersonaPack(
@@ -169,6 +201,22 @@ def run(config_path: str, out_dir: str, limit: int | None) -> None:
     )
     pack.to_json(str(out / "persona_pack.json"))
 
+    # Build an explicit scope label so the LLM knows what "baseline" actually means
+    src = cfg["source"]
+    src_ref = (f"{src.get('database','?')}.{src.get('schema','?')}.{src.get('table','?')}"
+               if src["type"] == "snowflake" else src.get("path", "local file"))
+    scope_parts = [f"Snapshot from {src_ref}", f"{int(len(df)+len(excluded_df) if excluded_df is not None else len(df)):,} users in source"]
+    if pre:
+        scope_parts.append(
+            f"Baseline = the {len(df):,} users where {pre['column']} ∈ {pre['values']} "
+            f"(prefiltered before clustering)"
+        )
+    else:
+        scope_parts.append(f"Baseline = all {len(df):,} users in the sample")
+    scope_parts.append("This is a sample, not the full DoorDash population.")
+    baseline_scope = " | ".join(scope_parts)
+    baseline_n = len(df)
+
     for p in personas:
         pvals = persona_value_maps.get(p.id, {})
         prompt = compile_prompt(
@@ -177,6 +225,8 @@ def run(config_path: str, out_dir: str, limit: int | None) -> None:
             pvals,
             baseline,
             [asdict(f) for f in p.top_features],
+            baseline_scope=baseline_scope,
+            baseline_n=baseline_n,
         )
         (out / "prompts" / f"{p.id}.md").write_text(prompt)
 
