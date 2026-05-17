@@ -50,7 +50,7 @@ v0.1 — pipeline runs end-to-end on real Snowflake data. First two runs documen
 
 ## Sample output
 
-See [`samples/run_2_active_only/`](samples/run_2_active_only/) for a complete Persona Pack (10 personas, 7 prompts, baseline crosstab) from a 10K-user DoorDash run.
+See [`samples/run_5_with_baseline_and_names/`](samples/run_5_with_baseline_and_names/) for the latest Persona Pack (10 named personas, full prompts with population baseline, persona feature snapshot).
 
 ## Runs to date
 
@@ -58,6 +58,7 @@ See [`samples/run_2_active_only/`](samples/run_2_active_only/) for a complete Pe
 |---|---|---|---|---|
 | #1 | all users, no exclusions, k∈[5,12] | 12 | 0.797 | Demographics dominate; lifestage rediscovered as clusters |
 | #2 | prefilter Active, exclude demo+lifestage from embedding, k∈[4,8] | 7 | 0.439 | Niche personas clean (grocery, app-uninstallers, Caviar); 53% mass remains |
+| #5 | run #2 config + baseline in prompts + auto-naming + full feature snapshot | 7 | 0.439 | Every persona named; prompts now self-contained with reference frame |
 
 ## Follow-ups
 

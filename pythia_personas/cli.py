@@ -12,9 +12,9 @@ import pandas as pd
 import yaml
 
 from .adapter import adapt_all
-from .calibrate import bootstrap_stability, compute_weights, top_distinctive_features
+from .calibrate import bootstrap_stability, compute_weights, profile_clusters, top_distinctive_features
 from .cluster import assign, fit_gmm_bic
-from .compile_prompts import compile_prompt
+from .compile_prompts import auto_name, compile_prompt, llm_polish_name
 from .encoder import encode_all
 from .io import read_local, read_snowflake
 from .schema import PERSONA_PACK_SCHEMA_VERSION, FeatureDelta, Persona, PersonaPack, PersonaWeights
@@ -96,7 +96,12 @@ def run(config_path: str, out_dir: str, limit: int | None) -> None:
         click.secho(f"      WARNING: stability below threshold {cfg['cluster']['stability_threshold']}",
                     fg="yellow")
 
+    click.echo("      computing cluster profiles in original feature units …")
+    profile = profile_clusters(df, groups, labels)
+    baseline = profile["baseline"]
+
     personas: list[Persona] = []
+    persona_value_maps: dict[str, dict] = {}
     for cid in sorted(set(labels.tolist())):
         feats = top_distinctive_features(
             adapted, labels, cid,
@@ -104,18 +109,27 @@ def run(config_path: str, out_dir: str, limit: int | None) -> None:
             threshold_sigma=cfg["prompt_compiler"]["threshold_sigma"],
         )
         pid = f"P{cid+1:02d}"
+        pvals = profile["clusters"][int(cid)]
+
+        # Naming: try LLM polish first, fall back to deterministic
+        named = llm_polish_name(pvals, feats)
+        if named is None:
+            named = auto_name(pvals, feats)
+        name, desc, jtbd = named
+
         persona = Persona(
             id=pid,
-            name=f"Persona {pid}",          # LLM naming hook lives in Layer E
-            description="(to be generated)",
-            jtbd="(to be generated)",
+            name=name,
+            description=desc,
+            jtbd=jtbd,
             size=int((labels == cid).sum()),
             weights=PersonaWeights(**weights[cid]),
-            stability=overall_stability,    # per-cluster stability is a follow-up
+            stability=overall_stability,
             top_features=[FeatureDelta(**f) for f in feats],
             centroid={f["feature"]: f["centroid_value"] for f in feats},
         )
         personas.append(persona)
+        persona_value_maps[pid] = pvals
 
     if excluded_df is not None and len(excluded_df) > 0:
         click.echo(f"      adding {excluded_df[pre['column']].nunique()} fixed personas from prefilter")
@@ -156,9 +170,12 @@ def run(config_path: str, out_dir: str, limit: int | None) -> None:
     pack.to_json(str(out / "persona_pack.json"))
 
     for p in personas:
+        pvals = persona_value_maps.get(p.id, {})
         prompt = compile_prompt(
             cfg["company_id"],
             {"name": p.name, "description": p.description, "jtbd": p.jtbd},
+            pvals,
+            baseline,
             [asdict(f) for f in p.top_features],
         )
         (out / "prompts" / f"{p.id}.md").write_text(prompt)

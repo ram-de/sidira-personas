@@ -124,5 +124,5 @@ weights:
   revenue_column: null   # not available in this snapshot
 
 prompt_compiler:
-  top_n_distinctive_features_per_group: 3
-  threshold_sigma: 0.5
+  top_n_distinctive_features_per_group: 5
+  threshold_sigma: 0.3

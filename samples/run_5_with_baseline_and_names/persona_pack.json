@@ -1,8 +1,8 @@
 {
   "schema_version": "1.0",
   "company_id": "doordash",
-  "run_id": "dd-20260516T081509",
-  "created_at": "2026-05-16T08:15:21.270307",
+  "run_id": "dd-20260517T142702",
+  "created_at": "2026-05-17T14:27:15.211692",
   "n_users": 8823,
   "feature_groups": [
     "demographic_identity",
@@ -16,9 +16,9 @@
   "personas": [
     {
       "id": "P01",
-      "name": "Persona P01",
-      "description": "(to be generated)",
-      "jtbd": "(to be generated)",
+      "name": "Australia Cohort",
+      "description": "Australian DoorDash user. Category mix and notification reachability differ from the US baseline; grocery is a larger share of demand in this market.",
+      "jtbd": "Get household and grocery essentials via DoorDash in a market with fewer restaurant alternatives.",
       "size": 171,
       "weights": {
         "by_headcount": 0.019381162869772185,
@@ -114,6 +114,22 @@
           "population_mean": 0.0022159058143488607,
           "population_std": 0.01605663219030693,
           "z_delta": 1.2408631058867052
+        },
+        {
+          "feature": "notification_message_type_ORDER_UPDATES",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.029239766081871343,
+          "population_mean": 0.0005667006687067891,
+          "population_std": 0.023800078148313777,
+          "z_delta": 1.2047466917748766
+        },
+        {
+          "feature": "notification_message_type_STORE_OFFERS",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.2631578947368421,
+          "population_mean": 0.7277569987532585,
+          "population_std": 0.4451395374223889,
+          "z_delta": -1.0437156553352
         }
       ],
       "centroid": {
@@ -127,14 +143,16 @@
         "app_uninstall_after_notif": 0.02213998830409357,
         "notification_message_type_REMINDERS": 0.3684210526315789,
         "notification_message_type_SPECIAL_OFFERS": 0.23976608187134502,
-        "uninstall_within_24h": 0.02213998830409357
+        "uninstall_within_24h": 0.02213998830409357,
+        "notification_message_type_ORDER_UPDATES": 0.029239766081871343,
+        "notification_message_type_STORE_OFFERS": 0.2631578947368421
       }
     },
     {
       "id": "P02",
-      "name": "Persona P02",
-      "description": "(to be generated)",
-      "jtbd": "(to be generated)",
+      "name": "Notification-Fatigued Engaged User",
+      "description": "Orders regularly but marketing volume exceeds tolerance. Uninstalls and unsubscribes spike after notification campaigns. Sensitive to push/email frequency.",
+      "jtbd": "Order when needed; aggressively reduce promotional noise from the app and brand.",
       "size": 400,
       "weights": {
         "by_headcount": 0.04533605349654313,
@@ -143,6 +161,14 @@
       },
       "stability": 0.43946731380670245,
       "top_features": [
+        {
+          "feature": "weekly_grocery_stockup_flag",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.0,
+          "population_mean": 0.1386149835656806,
+          "population_std": 0.34556389328360887,
+          "z_delta": -0.40112692980894693
+        },
         {
           "feature": "app_uninstall_after_notif",
           "group": "pain_points_friction",
@@ -182,21 +208,40 @@
           "population_mean": 0.016887679927462314,
           "population_std": 0.12885793780530194,
           "z_delta": 1.750860862086951
+        },
+        {
+          "feature": "notification_message_type_overall_TRANSACTIONAL",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.7575,
+          "population_mean": 0.9808455173977105,
+          "population_std": 0.13707559238494024,
+          "z_delta": -1.6293602202389486
+        },
+        {
+          "feature": "notification_channel_SMS",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.2425,
+          "population_mean": 0.021647965544599343,
+          "population_std": 0.14553945125876525,
+          "z_delta": 1.5174719469206437
         }
       ],
       "centroid": {
+        "weekly_grocery_stockup_flag": 0.0,
         "app_uninstall_after_notif": 0.035919355,
         "promo_dependency_score": 0.0447667484529598,
         "uninstall_within_24h": 0.035919355,
         "notification_message_type_UNKNOWN": 0.2425,
-        "notification_message_type_overall_UNKNOWN": 0.2425
+        "notification_message_type_overall_UNKNOWN": 0.2425,
+        "notification_message_type_overall_TRANSACTIONAL": 0.7575,
+        "notification_channel_SMS": 0.2425
       }
     },
     {
       "id": "P03",
-      "name": "Persona P03",
-      "description": "(to be generated)",
-      "jtbd": "(to be generated)",
+      "name": "Average Engaged User \u2014 high Device Type Notif ",
+      "description": "Steady, moderate-frequency DoorDash user. Restaurant-leaning category mix, average notification engagement, mainstream behavior with no strongly distinctive signals. Most distinctive: channel_tech_behavior.device_type_notif_ (+3.09\u03c3).",
+      "jtbd": "Get reliably delivered meals as a regular convenience tool.",
       "size": 473,
       "weights": {
         "by_headcount": 0.05360988325966225,
@@ -205,6 +250,46 @@
       },
       "stability": 0.43946731380670245,
       "top_features": [
+        {
+          "feature": "country_id_1",
+          "group": "demographic_identity",
+          "centroid_value": 0.8520084566596194,
+          "population_mean": 0.9424232120593903,
+          "population_std": 0.23295461394158543,
+          "z_delta": -0.38812176273290216
+        },
+        {
+          "feature": "country_id_503",
+          "group": "demographic_identity",
+          "centroid_value": 0.021141649048625793,
+          "population_mean": 0.003173523744758019,
+          "population_std": 0.0562477650984486,
+          "z_delta": 0.31944603083195855
+        },
+        {
+          "feature": "region_name_New Zealand",
+          "group": "demographic_identity",
+          "centroid_value": 0.021141649048625793,
+          "population_mean": 0.003173523744758019,
+          "population_std": 0.0562477650984486,
+          "z_delta": 0.31944603083195855
+        },
+        {
+          "feature": "signup_date",
+          "group": "demographic_identity",
+          "centroid_value": -0.3048543624096886,
+          "population_mean": -6.184935068160002e-16,
+          "population_std": 1.0,
+          "z_delta": -0.304854362409688
+        },
+        {
+          "feature": "first_order_date",
+          "group": "demographic_identity",
+          "centroid_value": -0.30400431615644186,
+          "population_mean": -2.0616450227200005e-16,
+          "population_std": 1.0,
+          "z_delta": -0.30400431615644163
+        },
         {
           "feature": "order_frequency_90d",
           "group": "behavioral_patterns",
@@ -222,6 +307,30 @@
           "z_delta": -0.5033119502856344
         },
         {
+          "feature": "nv_order_frequency_28d",
+          "group": "behavioral_patterns",
+          "centroid_value": -0.49605399536151124,
+          "population_mean": -1.2079951305000003e-17,
+          "population_std": 1.0,
+          "z_delta": -0.49605399536151124
+        },
+        {
+          "feature": "total_orders_lifetime",
+          "group": "behavioral_patterns",
+          "centroid_value": -0.4748810220305771,
+          "population_mean": -2.0616450227200005e-16,
+          "population_std": 1.0,
+          "z_delta": -0.47488102203057686
+        },
+        {
+          "feature": "avg_days_between_orders",
+          "group": "behavioral_patterns",
+          "centroid_value": 0.41135761321784997,
+          "population_mean": 2.899188313200001e-17,
+          "population_std": 1.0,
+          "z_delta": 0.4113576132178499
+        },
+        {
           "feature": "reminder_triggered_order_share",
           "group": "motivations_jtbd",
           "centroid_value": 0.0611448331644661,
@@ -236,6 +345,30 @@
           "population_mean": 0.2706745526828105,
           "population_std": 0.1961623970113773,
           "z_delta": -0.8064957483695424
+        },
+        {
+          "feature": "category_motivation_profile__restaurant",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.9444558100687768,
+          "population_mean": 0.8630164858059952,
+          "population_std": 0.16446846480525273,
+          "z_delta": 0.49516680513321465
+        },
+        {
+          "feature": "weekly_grocery_stockup_flag",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.0,
+          "population_mean": 0.1386149835656806,
+          "population_std": 0.34556389328360887,
+          "z_delta": -0.40112692980894693
+        },
+        {
+          "feature": "category_motivation_profile__grocery",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.015446741504738608,
+          "population_mean": 0.045479219412688246,
+          "population_std": 0.0887098229401416,
+          "z_delta": -0.3385473774219406
         },
         {
           "feature": "device_type_notif_",
@@ -260,23 +393,70 @@
           "population_mean": 0.8006347047489516,
           "population_std": 0.3995458266137071,
           "z_delta": -1.400640097626836
+        },
+        {
+          "feature": "notification_message_type_RECOMMENDATIONS",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.11839323467230443,
+          "population_mean": 0.00827382976311912,
+          "population_std": 0.09058865054585184,
+          "z_delta": 1.2155982481872594
+        },
+        {
+          "feature": "visit_within_24h",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.3036579598308668,
+          "population_mean": 0.5568809210019268,
+          "population_std": 0.21517051097929024,
+          "z_delta": -1.176847886908779
+        },
+        {
+          "feature": "active_90d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": -0.46425031311362197,
+          "population_mean": 2.448203464480001e-16,
+          "population_std": 1.0,
+          "z_delta": -0.4642503131136222
+        },
+        {
+          "feature": "active_28d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": -0.4593290959940128,
+          "population_mean": -3.221320348000001e-17,
+          "population_std": 0.9999999999999998,
+          "z_delta": -0.45932909599401284
         }
       ],
       "centroid": {
+        "country_id_1": 0.8520084566596194,
+        "country_id_503": 0.021141649048625793,
+        "region_name_New Zealand": 0.021141649048625793,
+        "signup_date": -0.3048543624096886,
+        "first_order_date": -0.30400431615644186,
         "order_frequency_90d": -0.5036370595660755,
         "order_frequency_28d": -0.5033119502856338,
+        "nv_order_frequency_28d": -0.49605399536151124,
+        "total_orders_lifetime": -0.4748810220305771,
+        "avg_days_between_orders": 0.41135761321784997,
         "reminder_triggered_order_share": 0.0611448331644661,
         "promo_triggered_order_share": 0.11247041350315647,
+        "category_motivation_profile__restaurant": 0.9444558100687768,
+        "weekly_grocery_stockup_flag": 0.0,
+        "category_motivation_profile__grocery": 0.015446741504738608,
         "device_type_notif_": 0.6828752642706131,
         "notification_message_type_SPECIAL_OFFERS": 0.2832980972515856,
-        "device_type_notif_ios": 0.24101479915433405
+        "device_type_notif_ios": 0.24101479915433405,
+        "notification_message_type_RECOMMENDATIONS": 0.11839323467230443,
+        "visit_within_24h": 0.3036579598308668,
+        "active_90d_agg": -0.46425031311362197,
+        "active_28d_agg": -0.4593290959940128
       }
     },
     {
       "id": "P04",
-      "name": "Persona P04",
-      "description": "(to be generated)",
-      "jtbd": "(to be generated)",
+      "name": "Average Engaged User \u2014 low Nv Order Frequency 28D",
+      "description": "Steady, moderate-frequency DoorDash user. Restaurant-leaning category mix, average notification engagement, mainstream behavior with no strongly distinctive signals. Most distinctive: behavioral_patterns.nv_order_frequency_28d (-0.58\u03c3).",
+      "jtbd": "Get reliably delivered meals as a regular convenience tool.",
       "size": 4648,
       "weights": {
         "by_headcount": 0.5268049416298312,
@@ -292,17 +472,44 @@
           "population_mean": -1.2079951305000003e-17,
           "population_std": 1.0,
           "z_delta": -0.5808392402554041
+        },
+        {
+          "feature": "weekly_grocery_stockup_flag",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.0,
+          "population_mean": 0.1386149835656806,
+          "population_std": 0.34556389328360887,
+          "z_delta": -0.40112692980894693
+        },
+        {
+          "feature": "category_motivation_profile__grocery",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.012282012136201248,
+          "population_mean": 0.045479219412688246,
+          "population_std": 0.0887098229401416,
+          "z_delta": -0.3742224499634878
+        },
+        {
+          "feature": "category_motivation_profile__restaurant",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.9207730394983489,
+          "population_mean": 0.8630164858059952,
+          "population_std": 0.16446846480525273,
+          "z_delta": 0.3511709905041264
         }
       ],
       "centroid": {
-        "nv_order_frequency_28d": -0.5808392402554041
+        "nv_order_frequency_28d": -0.5808392402554041,
+        "weekly_grocery_stockup_flag": 0.0,
+        "category_motivation_profile__grocery": 0.012282012136201248,
+        "category_motivation_profile__restaurant": 0.9207730394983489
       }
     },
     {
       "id": "P05",
-      "name": "Persona P05",
-      "description": "(to be generated)",
-      "jtbd": "(to be generated)",
+      "name": "Average Engaged User \u2014 high Notification Message Type Remi",
+      "description": "Steady, moderate-frequency DoorDash user. Restaurant-leaning category mix, average notification engagement, mainstream behavior with no strongly distinctive signals. Most distinctive: channel_tech_behavior.notification_message_type_REMINDERS (+0.59\u03c3).",
+      "jtbd": "Get reliably delivered meals as a regular convenience tool.",
       "size": 1543,
       "weights": {
         "by_headcount": 0.1748838263629151,
@@ -312,23 +519,68 @@
       "stability": 0.43946731380670245,
       "top_features": [
         {
+          "feature": "nv_order_frequency_28d",
+          "group": "behavioral_patterns",
+          "centroid_value": 0.4459991228838983,
+          "population_mean": -1.2079951305000003e-17,
+          "population_std": 1.0,
+          "z_delta": 0.4459991228838983
+        },
+        {
+          "feature": "category_motivation_profile__restaurant",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.7920490048701005,
+          "population_mean": 0.8630164858059952,
+          "population_std": 0.16446846480525273,
+          "z_delta": -0.4314959771767027
+        },
+        {
+          "feature": "weekly_grocery_stockup_flag",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.0,
+          "population_mean": 0.1386149835656806,
+          "population_std": 0.34556389328360887,
+          "z_delta": -0.40112692980894693
+        },
+        {
+          "feature": "speed_seeker_flag",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.06700000328359663,
+          "population_mean": 0.03742412823265331,
+          "population_std": 0.07721590571911392,
+          "z_delta": 0.3830282734561275
+        },
+        {
           "feature": "notification_message_type_REMINDERS",
           "group": "channel_tech_behavior",
           "centroid_value": 0.1561892417368762,
           "population_mean": 0.04012240734444067,
           "population_std": 0.19625739550734098,
           "z_delta": 0.5914010735360751
+        },
+        {
+          "feature": "notification_message_type_STORE_PROMOTIONS",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.0,
+          "population_mean": 0.18723790094072312,
+          "population_std": 0.3901244922251188,
+          "z_delta": -0.47994397858178744
         }
       ],
       "centroid": {
-        "notification_message_type_REMINDERS": 0.1561892417368762
+        "nv_order_frequency_28d": 0.4459991228838983,
+        "category_motivation_profile__restaurant": 0.7920490048701005,
+        "weekly_grocery_stockup_flag": 0.0,
+        "speed_seeker_flag": 0.06700000328359663,
+        "notification_message_type_REMINDERS": 0.1561892417368762,
+        "notification_message_type_STORE_PROMOTIONS": 0.0
       }
     },
     {
       "id": "P06",
-      "name": "Persona P06",
-      "description": "(to be generated)",
-      "jtbd": "(to be generated)",
+      "name": "Grocery Stockup Power User",
+      "description": "Uses DoorDash as a weekly grocery delivery channel. NV-order frequency is materially above baseline; restaurant share is below average. Large basket sizes on a predictable cadence.",
+      "jtbd": "Replace the weekly trip to the grocery store with predictable home delivery.",
       "size": 1365,
       "weights": {
         "by_headcount": 0.1547092825569534,
@@ -362,6 +614,22 @@
           "z_delta": 0.5673406598537533
         },
         {
+          "feature": "total_orders_lifetime",
+          "group": "behavioral_patterns",
+          "centroid_value": 0.3697427148826627,
+          "population_mean": -2.0616450227200005e-16,
+          "population_std": 1.0,
+          "z_delta": 0.3697427148826629
+        },
+        {
+          "feature": "avg_days_between_orders",
+          "group": "behavioral_patterns",
+          "centroid_value": -0.3225023196337953,
+          "population_mean": 2.899188313200001e-17,
+          "population_std": 1.0,
+          "z_delta": -0.32250231963379533
+        },
+        {
           "feature": "weekly_grocery_stockup_flag",
           "group": "motivations_jtbd",
           "centroid_value": 0.7677655677655678,
@@ -386,6 +654,22 @@
           "z_delta": -0.7500990235936035
         },
         {
+          "feature": "promo_triggered_order_share",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.37359106290595456,
+          "population_mean": 0.2706745526828105,
+          "population_std": 0.1961623970113773,
+          "z_delta": 0.5246495342181967
+        },
+        {
+          "feature": "category_motivation_profile__retail",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.012588966564705597,
+          "population_mean": 0.006587797402809569,
+          "population_std": 0.019369485504629143,
+          "z_delta": 0.3098259455813526
+        },
+        {
           "feature": "num_notifications_weekly",
           "group": "channel_tech_behavior",
           "centroid_value": 0.5545003083735853,
@@ -408,25 +692,56 @@
           "population_mean": 0.2706745528731724,
           "population_std": 0.196162395765854,
           "z_delta": 0.5246495296077731
+        },
+        {
+          "feature": "visit_within_24h",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.6616286432234432,
+          "population_mean": 0.5568809210019268,
+          "population_std": 0.21517051097929024,
+          "z_delta": 0.48681262941090553
+        },
+        {
+          "feature": "active_28d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 0.4973912973527129,
+          "population_mean": -3.221320348000001e-17,
+          "population_std": 0.9999999999999998,
+          "z_delta": 0.4973912973527131
+        },
+        {
+          "feature": "active_90d_agg",
+          "group": "loyalty_lifecycle",
+          "centroid_value": 0.49462438622746746,
+          "population_mean": 2.448203464480001e-16,
+          "population_std": 1.0,
+          "z_delta": 0.49462438622746724
         }
       ],
       "centroid": {
         "nv_order_frequency_28d": 1.5153541795532568,
         "order_frequency_28d": 0.579628107199862,
         "order_frequency_90d": 0.5673406598537537,
+        "total_orders_lifetime": 0.3697427148826627,
+        "avg_days_between_orders": -0.3225023196337953,
         "weekly_grocery_stockup_flag": 0.7677655677655678,
         "category_motivation_profile__grocery": 0.12700206398691682,
         "category_motivation_profile__restaurant": 0.7396488509436362,
+        "promo_triggered_order_share": 0.37359106290595456,
+        "category_motivation_profile__retail": 0.012588966564705597,
         "num_notifications_weekly": 0.5545003083735853,
         "notification_message_type_STORE_PROMOTIONS": 0.4,
-        "order_within_24h": 0.3735910615384615
+        "order_within_24h": 0.3735910615384615,
+        "visit_within_24h": 0.6616286432234432,
+        "active_28d_agg": 0.4973912973527129,
+        "active_90d_agg": 0.49462438622746746
       }
     },
     {
       "id": "P07",
-      "name": "Persona P07",
-      "description": "(to be generated)",
-      "jtbd": "(to be generated)",
+      "name": "Caviar SMS Loyalist",
+      "description": "Orders on the Caviar brand surface (not core DoorDash). SMS-reachable, not push-heavy. Expectations of restaurant quality and brand tone differ from mainstream DD users.",
+      "jtbd": "Order from premium/curated restaurants on a brand they trust, with low promotional noise.",
       "size": 223,
       "weights": {
         "by_headcount": 0.025274849824322793,
@@ -450,6 +765,30 @@
           "population_mean": 0.002493482942309872,
           "population_std": 0.04987531878679087,
           "z_delta": 1.8381219985187154
+        },
+        {
+          "feature": "signup_date",
+          "group": "demographic_identity",
+          "centroid_value": -0.42074949328925865,
+          "population_mean": -6.184935068160002e-16,
+          "population_std": 1.0,
+          "z_delta": -0.42074949328925804
+        },
+        {
+          "feature": "first_order_date",
+          "group": "demographic_identity",
+          "centroid_value": -0.4195655389279464,
+          "population_mean": -2.0616450227200005e-16,
+          "population_std": 1.0,
+          "z_delta": -0.4195655389279462
+        },
+        {
+          "feature": "reminder_triggered_order_share",
+          "group": "motivations_jtbd",
+          "centroid_value": 0.21476417998241107,
+          "population_mean": 0.34339717306660444,
+          "population_std": 0.3295093495314163,
+          "z_delta": -0.3903773694649874
         },
         {
           "feature": "notification_unsubscribe_rate",
@@ -482,15 +821,36 @@
           "population_mean": 0.9808455173977105,
           "population_std": 0.13707559238494024,
           "z_delta": -2.215678716176964
+        },
+        {
+          "feature": "unsubscribe_within_24h",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.007569587443946189,
+          "population_mean": 0.0001964836223506744,
+          "population_std": 0.004275016359301406,
+          "z_delta": 1.7246960483679592
+        },
+        {
+          "feature": "notification_message_type_overall_UNKNOWN",
+          "group": "channel_tech_behavior",
+          "centroid_value": 0.23318385650224216,
+          "population_mean": 0.016887679927462314,
+          "population_std": 0.12885793780530194,
+          "z_delta": 1.6785630769723539
         }
       ],
       "centroid": {
         "consumer_experience_doordash": 0.905829596412556,
         "consumer_experience_caviar": 0.09417040358744394,
+        "signup_date": -0.42074949328925865,
+        "first_order_date": -0.4195655389279464,
+        "reminder_triggered_order_share": 0.21476417998241107,
         "notification_unsubscribe_rate": 0.007569587443946189,
         "notification_channel_PUSH": 0.547085201793722,
         "notification_channel_SMS": 0.42152466367713004,
-        "notification_message_type_overall_TRANSACTIONAL": 0.6771300448430493
+        "notification_message_type_overall_TRANSACTIONAL": 0.6771300448430493,
+        "unsubscribe_within_24h": 0.007569587443946189,
+        "notification_message_type_overall_UNKNOWN": 0.23318385650224216
       }
     },
     {
