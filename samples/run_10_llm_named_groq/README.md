@@ -37,9 +37,9 @@ export GROQ_API_KEY=<your_groq_key>
 # Optional: override default model
 # export GROQ_MODEL=llama-3.3-70b-versatile
 
-cd ~/Projects/pythia-personas
+cd ~/Projects/sidira-personas
 source .venv/bin/activate
-pythia-personas run --config config/doordash.yaml
+sidira-personas run --config config/doordash.yaml
 ```
 
 Provider preference: `GROQ_API_KEY` → `ANTHROPIC_API_KEY` → fallback. Pass `--no-llm` to force generic names regardless of env keys.

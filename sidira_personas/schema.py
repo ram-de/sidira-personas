@@ -1,4 +1,4 @@
-"""Persona Pack JSON schema — versioned contract consumed by the Pythia simulation engine."""
+"""Persona Pack JSON schema — versioned contract consumed by the Sidira simulation engine."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict

@@ -1,4 +1,4 @@
-"""CLI entry point: pythia-personas run --config config/<company>.yaml"""
+"""CLI entry point: sidira-personas run --config config/<company>.yaml"""
 from __future__ import annotations
 
 import datetime as dt
