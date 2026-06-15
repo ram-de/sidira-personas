@@ -47,7 +47,7 @@ class Persona:
     jtbd: str
     size: int
     weights: PersonaWeights
-    stability: float
+    stability: float | None
     top_features: list[FeatureDelta]
     centroid: dict[str, float]
     # --- v1.1 (additive; see module docstring) ---
@@ -55,6 +55,15 @@ class Persona:
     feature_scale: dict[str, float] = field(default_factory=dict)
     sample_rows: list[dict[str, float]] = field(default_factory=list)
     posterior_mean: dict[str, float] | None = None
+    # --- #7 honesty fields (additive) ---
+    # ``stability`` now carries the per-cluster Jaccard (Hennig clusterboot) for discovered
+    # personas, and ``None`` for FIXED_* hard-defined segments (no GMM bootstrap applies — the
+    # old hard-coded 1.0 was a fiction). ``stability_verdict`` is its interpretation band.
+    stability_verdict: str | None = None
+    # Normalized entropy of ``posterior_mean`` (0 = crisp identity, 1 = maximally mixed); ``None``
+    # for FIXED_* personas. Measures assignment ambiguity / cluster overlap — a high value means a
+    # falsely-crisp identity, which is what collapses downstream simulated-agent variance.
+    posterior_entropy: float | None = None
 
 
 @dataclass

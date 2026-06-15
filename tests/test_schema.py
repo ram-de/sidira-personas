@@ -39,6 +39,16 @@ def test_v1_0_persona_still_constructs_via_defaults():
     assert p.feature_scale == {}
     assert p.sample_rows == []
     assert p.posterior_mean is None
+    # #7 honesty fields default to None when omitted
+    assert p.stability_verdict is None
+    assert p.posterior_entropy is None
+
+
+def test_fixed_persona_allows_null_stability():
+    """FIXED_* personas carry stability=None (no GMM bootstrap) — the old hard-coded 1.0 is gone."""
+    p = _persona(stability=None, stability_verdict="n/a (hard-defined)", posterior_entropy=None)
+    assert p.stability is None
+    assert p.stability_verdict == "n/a (hard-defined)"
 
 
 def test_pack_round_trips_through_json(tmp_path):
@@ -47,6 +57,9 @@ def test_pack_round_trips_through_json(tmp_path):
         feature_scale={"f0": 0.5, "f1": 0.25},
         sample_rows=[{"f0": 1.1, "f1": 2.2}, {"f0": 0.9, "f1": 1.8}],
         posterior_mean={"P01": 0.7, "P02": 0.3},
+        stability=0.88,
+        stability_verdict="highly stable",
+        posterior_entropy=0.61,
     )
     pack = PersonaPack(
         schema_version=PERSONA_PACK_SCHEMA_VERSION,
@@ -72,3 +85,6 @@ def test_pack_round_trips_through_json(tmp_path):
     assert lp["feature_scale"] == {"f0": 0.5, "f1": 0.25}
     assert len(lp["sample_rows"]) == 2
     assert abs(sum(lp["posterior_mean"].values()) - 1.0) < 1e-9
+    assert lp["stability"] == 0.88
+    assert lp["stability_verdict"] == "highly stable"
+    assert lp["posterior_entropy"] == 0.61
