@@ -218,6 +218,25 @@ def _llm_name_anthropic(prompt: str) -> tuple[str, str, str] | None:
         return None
 
 
+_VALID_PROVIDERS = ("groq", "anthropic")
+
+
+def _validate_provider(provider: str | None) -> None:
+    """Reject unknown forced providers loudly.
+
+    A forced ``provider`` that isn't one of the known backends is a caller
+    misconfiguration (typo, casing, a model id passed where a provider was
+    expected). Raising here keeps the no-silent-fallback contract intact at the
+    API boundary — an unrecognized value must NOT quietly re-enable the
+    first-available-wins path and pick a provider the caller never asked for.
+    """
+    if provider is not None and provider not in _VALID_PROVIDERS:
+        raise ValueError(
+            f"unknown LLM provider {provider!r}; expected one of "
+            f"{_VALID_PROVIDERS} or None for auto-select"
+        )
+
+
 def llm_name(
     company_id: str,
     persona_values: dict,
@@ -230,12 +249,14 @@ def llm_name(
     ``None`` the preference is first-available-wins (Groq → Anthropic). A forced
     provider whose key is absent returns ``None`` (caller falls back to a generic
     name) rather than silently using the other provider — so a caller's explicit
-    choice is never overridden.
+    choice is never overridden. An unrecognized forced provider raises
+    ``ValueError`` (it is never treated as auto-select).
     Returns None on any failure; caller must fall back to `generic_fallback_name`.
 
     Company-agnostic: the LLM sees only company_id, feature names, persona values,
     and baseline-relative z-scores. Works on any feature schema.
     """
+    _validate_provider(provider)
     prompt = _build_naming_prompt(company_id, persona_values, top_features)
     if provider == "groq":
         return _llm_name_groq(prompt)
@@ -252,7 +273,9 @@ def llm_provider_in_use(provider: str | None = None) -> str | None:
 
     Honors a forced ``provider`` (returns None if that provider's key is absent),
     else first-available-wins (Groq → Anthropic). Used for the progress log.
+    An unrecognized forced provider raises ``ValueError``.
     """
+    _validate_provider(provider)
     groq = f"groq:{os.environ.get('GROQ_MODEL', 'llama-3.3-70b-versatile')}"
     anthropic = f"anthropic:{os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-6')}"
     if provider == "groq":
