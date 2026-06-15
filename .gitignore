@@ -9,6 +9,9 @@ outputs/
 !samples/
 *.parquet
 *.csv
+# …but the synthetic end-to-end fixture (#12) is committed so the documented
+# `sidira-personas run --config config/synthetic.yaml` works out of the box.
+!fixtures/synthetic/users.parquet
 .DS_Store
 .pytest_cache/
 .ruff_cache/

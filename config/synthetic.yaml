@@ -1,0 +1,90 @@
+# Synthetic end-to-end pipeline fixture (#12).
+# Fully synthetic — NO real company data. Regenerate the parquet with:
+#   python fixtures/synthetic_company.py
+# Then run the whole pipeline (no Snowflake / no API key needed):
+#   sidira-personas run --config config/synthetic.yaml --no-llm
+#
+# The dataset embeds 4 separable latent segments in the clustering groups and a
+# lifecycle prefilter whose non-Active rows become FIXED_* personas. Every adapter
+# type is exercised (count, score, ratio, flag, categorical, json_counts,
+# json_ratios, tenure_days).
+
+company_id: synthetic
+run_id_prefix: synth
+
+source:
+  type: local
+  path: fixtures/synthetic/users.parquet
+  user_id_column: consumer_id
+
+feature_groups:
+
+  demographic_identity:
+    - {name: signup_date,   type: tenure_days}
+    - {name: region,        type: categorical}
+    - {name: device_count,  type: count}
+
+  behavioral_patterns:
+    - {name: total_orders_lifetime,   type: count}
+    - {name: order_frequency_28d,     type: count}
+    - {name: avg_days_between_orders, type: score}
+    - {name: day_of_week_profile,     type: json_counts, keys: [weekday, weekend]}
+
+  motivations_jtbd:
+    - {name: deal_seeker_flag,    type: flag}
+    - {name: convenience_ratio,   type: ratio}
+    - {name: category_motivation, type: json_ratios, keys: [grocery, restaurant, retail]}
+
+  pain_points_friction:
+    - {name: high_fee_rate,     type: ratio}
+    - {name: unsubscribe_rate,  type: ratio}
+
+  value_sensitivity:
+    - {name: promo_redeemer_flag,     type: flag}
+    - {name: out_of_pocket_per_order, type: score}
+    - {name: discount_share,          type: ratio}
+
+  channel_tech_behavior:
+    - {name: notification_channel, type: categorical}
+    - {name: open_within_24h,      type: ratio}
+    - {name: click_within_24h,     type: ratio}
+    - {name: notifications_weekly, type: count}
+
+  loyalty_lifecycle:
+    - {name: cx_lifestage_detailed_status, type: categorical}
+    - {name: active_28d,                   type: count}
+
+snapshot_date_column: snapshot_date
+baseline_segment_column: hv_segment
+
+prefilter:
+  column: cx_lifestage_detailed_status
+  values: [Active]
+
+clustering_exclude_groups: [demographic_identity, loyalty_lifecycle]
+
+encoder:
+  method: pca
+  embedding_dim_per_group: 4
+
+cluster:
+  method: gmm
+  k_range: [3, 6]
+  selection: bic
+  random_state: 42
+  bootstrap_iters: 12
+  stability_threshold: 0.5
+  holdout_frac: 0.2
+
+weights:
+  schemes: [headcount, orders]
+  orders_column: total_orders_lifetime
+  revenue_column: null
+
+sampling:
+  n_synthetic_rows: 32
+  random_state: 42
+
+prompt_compiler:
+  top_n_distinctive_features_per_group: 4
+  threshold_sigma: 0.3
