@@ -66,6 +66,7 @@ def run_pipeline(
     *,
     run_id: str,
     no_llm: bool = False,
+    provider: str | None = None,
     log: Callable[[str], None] = _noop,
 ) -> PipelineResult:
     """Run the persona pipeline over an already-loaded ``df``.
@@ -73,8 +74,10 @@ def run_pipeline(
     ``df`` is the raw per-user source table (the caller does the reading/limit).
     ``cfg`` is the parsed pipeline config (same shape as ``config/*.yaml``).
     ``run_id`` is stamped into the pack (the caller owns its naming/uniqueness).
-    ``no_llm`` forces generic ``Persona##`` names. ``log`` receives progress
-    lines (the CLI passes ``click.echo``; the default is a no-op).
+    ``no_llm`` forces generic ``Persona##`` names. ``provider`` forces a specific
+    naming backend (``"groq"`` / ``"anthropic"``); ``None`` means
+    first-available-wins. ``log`` receives progress lines (the CLI passes
+    ``click.echo``; the default is a no-op).
     """
     pre = cfg.get("prefilter")
     excluded_df = None
@@ -161,9 +164,9 @@ def run_pipeline(
     if no_llm:
         log("      --no-llm flag set → all personas will use generic Persona## names")
     else:
-        provider = llm_provider_in_use()
-        if provider:
-            log(f"      naming via {provider} (fallback to Persona## on failure)")
+        provider_label = llm_provider_in_use(provider)
+        if provider_label:
+            log(f"      naming via {provider_label} (fallback to Persona## on failure)")
         else:
             log("      no LLM key (GROQ_API_KEY / ANTHROPIC_API_KEY) → using Persona## names")
 
@@ -182,7 +185,7 @@ def run_pipeline(
 
         # Naming: LLM is primary. Falls back to generic Persona## if LLM
         # is unavailable (no key, network error, etc.) or --no-llm is set.
-        named = None if no_llm else llm_name(cfg["company_id"], pvals, feats)
+        named = None if no_llm else llm_name(cfg["company_id"], pvals, feats, provider)
         if named is None:
             named = generic_fallback_name(pid, feats)
         name, desc, jtbd = named
@@ -263,7 +266,7 @@ def run_pipeline(
                 tot_all = float(pd.concat([df, excluded_df])[orders_col].sum()) or 1.0
                 w["by_orders"] = float(sub[orders_col].sum() / tot_all)
             persona_id = cid_label[:24]
-            fixed_named = None if no_llm else llm_name(cfg["company_id"], pvals, tf_candidates)
+            fixed_named = None if no_llm else llm_name(cfg["company_id"], pvals, tf_candidates, provider)
             if fixed_named is None:
                 fixed_named = (
                     f"Fixed — {fixed_val}",

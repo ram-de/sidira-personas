@@ -218,26 +218,49 @@ def _llm_name_anthropic(prompt: str) -> tuple[str, str, str] | None:
         return None
 
 
-def llm_name(company_id: str, persona_values: dict, top_features: list[dict]) -> tuple[str, str, str] | None:
+def llm_name(
+    company_id: str,
+    persona_values: dict,
+    top_features: list[dict],
+    provider: str | None = None,
+) -> tuple[str, str, str] | None:
     """Ask an LLM to name + describe a persona from its z-deltas vs. baseline.
 
-    Provider preference (first available wins): Groq → Anthropic.
+    ``provider`` forces a specific backend (``"groq"`` / ``"anthropic"``); when
+    ``None`` the preference is first-available-wins (Groq → Anthropic). A forced
+    provider whose key is absent returns ``None`` (caller falls back to a generic
+    name) rather than silently using the other provider — so a caller's explicit
+    choice is never overridden.
     Returns None on any failure; caller must fall back to `generic_fallback_name`.
 
     Company-agnostic: the LLM sees only company_id, feature names, persona values,
     and baseline-relative z-scores. Works on any feature schema.
     """
     prompt = _build_naming_prompt(company_id, persona_values, top_features)
+    if provider == "groq":
+        return _llm_name_groq(prompt)
+    if provider == "anthropic":
+        return _llm_name_anthropic(prompt)
     result = _llm_name_groq(prompt)
     if result is not None:
         return result
     return _llm_name_anthropic(prompt)
 
 
-def llm_provider_in_use() -> str | None:
-    """Used by the CLI to print which provider it picked up. None = fallback path."""
+def llm_provider_in_use(provider: str | None = None) -> str | None:
+    """Which provider naming will use. None = generic-fallback path.
+
+    Honors a forced ``provider`` (returns None if that provider's key is absent),
+    else first-available-wins (Groq → Anthropic). Used for the progress log.
+    """
+    groq = f"groq:{os.environ.get('GROQ_MODEL', 'llama-3.3-70b-versatile')}"
+    anthropic = f"anthropic:{os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-6')}"
+    if provider == "groq":
+        return groq if os.environ.get("GROQ_API_KEY") else None
+    if provider == "anthropic":
+        return anthropic if os.environ.get("ANTHROPIC_API_KEY") else None
     if os.environ.get("GROQ_API_KEY"):
-        return f"groq:{os.environ.get('GROQ_MODEL', 'llama-3.3-70b-versatile')}"
+        return groq
     if os.environ.get("ANTHROPIC_API_KEY"):
-        return f"anthropic:{os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-6')}"
+        return anthropic
     return None
