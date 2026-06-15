@@ -88,4 +88,12 @@ See [`samples/run_10_llm_named_groq/`](samples/run_10_llm_named_groq/) for the l
 5. **Per-cluster stability.** Bootstrap stability is currently a single overall ARI. Switch to per-cluster Jaccard so unstable clusters can be flagged individually.
 6. **HTML diagnostic report.** BIC curve, weight distributions, t-SNE scatter of the 40-dim embedding colored by cluster, baseline crosstab. Useful before any cluster ships to Sidira.
 7. **Per-cluster orders/revenue concentration alerts.** When a small cluster carries an outsized share of orders (e.g., P06 at 15% headcount drives 22% orders), the Persona Pack should surface that as a "high leverage" flag for simulation cohort selection.
-8. **Schema versioning.** Persona Pack v1.0 is current. Bump to v1.1 when feature enrichment lands (downstream consumers will need to know the schema changed).
+8. **Schema versioning.** ✅ **v1.1 landed** (additive) to unblock the simulator's §2 step-2 individual-row
+   layer (ram-de/sidira-personas#7). Each `Persona` now also carries `centroid_full` (mean over all adapted
+   features), `feature_scale` (within-cluster std — the step-2 z-score denominator), `sample_rows` (N
+   covariance-aware synthetic rows, privacy-clean), and `posterior_mean` (mean GMM soft membership; `None`
+   for FIXED_* personas). `assignments.parquet` also gains `post_P*` soft-posterior columns. The fields are
+   additive (defaulted), so v1.0 packs still parse. The committed sample pack
+   (`samples/run_10_llm_named_groq/`) is a real DoorDash run and is **not** regenerated here (no data access
+   locally); it stays schema-valid and will pick up the new fields on the next live pipeline run.
+   *Follow-up (left on #7):* per-cluster Jaccard stability + train/test holdout.

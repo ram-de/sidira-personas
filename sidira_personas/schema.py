@@ -1,11 +1,25 @@
-"""Persona Pack JSON schema — versioned contract consumed by the Sidira simulation engine."""
+"""Persona Pack JSON schema — versioned contract consumed by the Sidira simulation engine.
+
+v1.1 (additive over v1.0) adds the four fields the simulator's §2 step-2 individual-row
+layer consumes (see ram-de/sidira-personas#7). All live in **adapted-feature space** — the
+same space the centroid values come from — so the consumer z-scores a sampled row directly:
+``z = (row[f] - centroid_full[f]) / feature_scale[f]``. New ``Persona`` fields:
+
+- ``centroid_full``  — cluster mean over ALL adapted features (not just the top-distinctive subset).
+- ``feature_scale``  — within-cluster std per feature (zero-floored), the z-score denominator.
+- ``sample_rows``    — N privacy-clean synthetic rows (covariance-aware draws), keyed by list index.
+- ``posterior_mean`` — mean GMM posterior over the cluster's members ({persona_id: prob}); the
+  soft-membership hedge. ``None`` for FIXED_* personas (hard-defined, no GMM posterior).
+
+Every new field is defaulted so v1.0 packs still parse unchanged.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from typing import Any
 import json
 
-PERSONA_PACK_SCHEMA_VERSION = "1.0"
+PERSONA_PACK_SCHEMA_VERSION = "1.1"
 
 
 @dataclass
@@ -36,6 +50,11 @@ class Persona:
     stability: float
     top_features: list[FeatureDelta]
     centroid: dict[str, float]
+    # --- v1.1 (additive; see module docstring) ---
+    centroid_full: dict[str, float] = field(default_factory=dict)
+    feature_scale: dict[str, float] = field(default_factory=dict)
+    sample_rows: list[dict[str, float]] = field(default_factory=list)
+    posterior_mean: dict[str, float] | None = None
 
 
 @dataclass
