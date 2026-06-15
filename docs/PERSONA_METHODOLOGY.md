@@ -18,9 +18,12 @@ A Persona Pack is not a slide of fictional archetypes and it is not a clustering
 It is **the richest faithfully-conditioning representation of a real userbase that the
 company's own data can support, accompanied by a falsifiable measurement that it works.**
 The product's entire defensibility rests on two facts established by the independent
-literature. First, ungrounded synthetic users are a parlor trick: rated "great" by only
-~31% of buyers, and reliable mainly "when the answer is already known"
-([MeasuringU review of 12 studies — 9 encouraging vs. 14 discouraging findings](https://measuringu.com/review-of-experiments-with-synthetic-users/)).
+literature. First, ungrounded synthetic users are a parlor trick: reliable mainly "when
+the answer is already known" — an independent review of 12 studies tallied 9 encouraging vs.
+14 discouraging findings
+([MeasuringU](https://measuringu.com/review-of-experiments-with-synthetic-users/)) — and
+standalone synthetic respondents are rated "great" by only ~31% of buyers (Columbia Business
+School, via [Solomon Partners](https://solomonpartners.com/insights/reports/synthetic-data-is-transforming-market-research/)).
 Second, the *same* technique grounded on a company's own real data crosses into
 usefulness — double-blind tests reach ~95% correlation with ground-truth surveys when
 the synthetic respondents are trained on the company's real data
@@ -52,8 +55,9 @@ since Haley (1968) finds demographics are "poor predictors of behavior," with "l
 support for the existing practice of demographic-based segmentation" and a tendency to
 *lower* out-of-sample accuracy
 ([demographics as predictors, Penn](https://learninganalytics.upenn.edu/ryanbaker/demographic-predictors.pdf)).
-Behavioral features out-predict static demographics by roughly 2.5×
-([Zigpoll](https://www.zigpoll.com/content/how-can-a-data-scientist-help-improve-the-accuracy-of-our-customer-segmentation-models-using-behavioral-data)).
+Behavioral features substantially out-predict static demographics for behavioral outcomes
+(one practitioner estimate puts the lift at ~2.5× —
+[Zigpoll](https://www.zigpoll.com/content/how-can-a-data-scientist-help-improve-the-accuracy-of-our-customer-segmentation-models-using-behavioral-data)).
 
 ### 1.2 The fix: bind per company, compute company-agnostically
 
@@ -202,9 +206,10 @@ PCA embedding. GMM is the continuous-Gaussian special case of a **finite mixture
 segmentation, giving within-cluster joint distributions, principled assignment, and a basis
 for choosing k ([FlexMix](https://cran.r-project.org/web/packages/flexmix/vignettes/flexmix-intro.pdf)).
 So we are in the right *family*. But GMM is the family's weakest member for behavioral data:
-it assumes continuous, elliptical, equal-shape components, while event features are counts,
-zero-inflated, and heavy-tailed; and its centroids are *average users who may not exist* —
-bland, weak conditioning targets.
+it assumes continuous, elliptical Gaussian components (even with `covariance_type="full"`,
+which frees each component's shape and orientation, the assumption is still
+*Gaussian-elliptical*), while event features are counts, zero-inflated, and heavy-tailed;
+and its centroids are *average users who may not exist* — bland, weak conditioning targets.
 
 ### 5.2 Three disciplines to add
 
@@ -259,10 +264,12 @@ Step-2 of the consumer (sidira-simulator) draws a *per-agent individual row* so 
 (`sample_rows`, MVN + ridge + clip) for this. This section is the rigorous version of that
 mechanism and its failure-mode ladder.
 
-**The exact mechanism.** Any covariance Σ factors as Σ = LLᵀ (Cholesky); to draw
-x ~ N(μ, Σ), sample z ~ N(0, I) and set **x = μ + Lz** — covariance preserved exactly
+**The exact mechanism.** Any *positive-definite* covariance Σ factors as Σ = LLᵀ (Cholesky);
+to draw x ~ N(μ, Σ), sample z ~ N(0, I) and set **x = μ + Lz** — covariance preserved exactly
 ([Gentle, *Computational Statistics*](https://juanitorduz.github.io/multivariate_normal/)).
-Near-singular Σ needs diagonal jitter (εI) before factoring — the bridge to shrinkage below.
+Cluster covariances are often only positive *semi*-definite or singular (small n, collinear
+features), where ordinary Cholesky fails; add diagonal jitter (εI) before factoring — the
+bridge to the shrinkage estimators below.
 
 **Three problems the naive MVN draw must address:**
 
@@ -283,7 +290,9 @@ Near-singular Σ needs diagonal jitter (εI) before factoring — the bridge to 
    uniform via its empirical CDF, then to normal via Φ⁻¹, estimate the latent correlation,
    sample N(0,R), invert back through the marginals
    ([Sklar 1959; SDV, Patki 2016](https://www.semanticscholar.org/paper/The-Synthetic-Data-Vault-Patki-Wedge/64ad643e8084486ca7d3312ed491a814d3fe440c)).
-   Rank correlations are preserved exactly. For explicitly mixed continuous/count/categorical
+   Rank correlations are preserved in expectation (exactly in the population limit; only
+   approximately in finite samples, and bounded for tied/discrete marginals — see the caveat
+   below). For explicitly mixed continuous/count/categorical
    under a covariance constraint, **NORTA** (Cario–Nelson) and **Hoff's extended rank
    likelihood** ([2007](https://projecteuclid.org/journals/annals-of-applied-statistics/volume-1/issue-1/Extending-the-rank-likelihood-for-semiparametric-copula-estimation/10.1214/07-AOAS107.full))
    are the canonical tools. *Caveat:* with discrete marginals the copula is non-unique and
@@ -312,9 +321,10 @@ wanted in *downstream* estimates and generally should *exceed* real n
 rows is fine for per-agent seeding; raise it when the pack is used for distributional
 estimation.
 
-**Why synthetic over real anonymized rows:** MVN/copula draws leak no real row
-combinations, so the pack is privacy-clean by default (real anonymized rows stay reserved
-for benchmarking). On privacy, note the field consensus: synthetic data does *not*
+**Why synthetic over real anonymized rows:** MVN/copula draws emit no verbatim real row,
+which makes the pack privacy-*friendlier* by construction than shipping real rows (real
+anonymized rows stay reserved for benchmarking). This is a reduction of risk, **not** a
+guarantee — the field consensus is explicit that synthetic data does *not*
 automatically confer privacy ([Stadler et al., "Anonymisation Groundhog Day," USENIX
 2022](https://www.usenix.org/system/files/sec22-stadler.pdf)), and cheap heuristics like
 Distance-to-Closest-Record are inadequate ([DCR Delusion, ESORICS
@@ -435,7 +445,8 @@ cannot copy. The five fundraise claims, each independently sourced:
 2. **We backtest, they can't:** recover the sign and magnitude of clients' *past* A/B
    results (target ATE correlation ≈ 0.9; Stanford reached 0.98).
 3. **Compounding flywheel:** each experiment becomes new ground truth.
-4. **Behavioral > demographic, quantified ~2.5×** — the scientific basis of the pack.
+4. **Behavioral > demographic for prediction** — the scientific basis of the pack
+   (large-sample marketing research; practitioner lift estimates ~2.5×).
 5. **Model-agnostic & distribution-aligned:** rides Bedrock/Azure/Anthropic and the AWS
    Agent Marketplace / Agent Skills standard rather than competing with the platforms.
 
@@ -467,8 +478,10 @@ A/B history we can backtest.
 
 ---
 
-*Every claim above is linked to a primary source (arXiv, JMR/JRSS-B/Annals/Marketing
-Science, Nature, USENIX, Segment/Mixpanel/feature-store docs, Stanford HAI, Hennig/fpc).
+*Every claim above is linked to a source, primary literature wherever one exists (arXiv,
+JMR/JRSS-B/Annals/Marketing Science, Nature, USENIX, Stanford HAI, Hennig/fpc); a few market
+and landscape figures cite secondary sources (industry docs, analyst notes, press), flagged
+as such inline.
 The two-repo split is by design: this document is the producer's (`sidira-personas`)
 methodology of record; the consumer (`sidira-simulator`) implements §6–§8 against the packs
 it emits.*
