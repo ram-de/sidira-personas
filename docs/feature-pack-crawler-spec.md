@@ -17,7 +17,7 @@ The Feature Pack Crawler is the third input to the Sidira simulation engine, alo
 
 ### Why this exists
 
-A persona agent reacting to "what if we add a reorder button to the homepage?" needs to know what the homepage looks like *today*. Without a current-product representation, the simulation is ungrounded — the agent invents context, and the resulting confidence score is fiction. The crawler closes that gap automatically and on a schedule, so PMs never have to hand-author "how our product works today" before validating a hypothesis.
+A persona agent reacting to "what if we add a Continue Watching row to the homepage?" needs to know what the homepage looks like *today*. Without a current-product representation, the simulation is ungrounded — the agent invents context, and the resulting confidence score is fiction. The crawler closes that gap automatically and on a schedule, so PMs never have to hand-author "how our product works today" before validating a hypothesis.
 
 ### Symmetry principle (load-bearing)
 
@@ -76,16 +76,16 @@ The unit of analysis is a **capability** — the smallest thing a single PM woul
 
 | Signal | Example (yes) | Example (no — too small) | Example (no — too big) |
 |---|---|---|---|
-| Has a user goal | Reorder a past order | "the cart icon" | "all of notifications" |
-| Has start + end state | DashPass Signup | A single button | "the whole app" |
-| Spans surfaces but coherent | Search | One dropdown option | "Restaurant experience" |
+| Has a user goal | Resume a partially-watched title | "the play icon" | "all of notifications" |
+| Has start + end state | Premium plan signup | A single button | "the whole app" |
+| Spans surfaces but coherent | Search | One dropdown option | "the whole catalog" |
 | Maps to org ownership | One PM or pod owns it | No specific owner | Owned by a department |
 | Ship-able independently | Yes | N/A | No — too entangled |
 
 Hierarchy:
 
 ```
-Journey         (emergent: Search → Cart → Checkout — captured via dependency links)
+Journey         (emergent: Search → Title page → Playback — captured via dependency links)
 └── Capability  ← unit of analysis (one reverse-PRD + one reverse-Figma per capability)
     └── Component   (lives inside the reverse-Figma)
         └── State   (default / error / empty)
@@ -117,10 +117,10 @@ Capabilities are stable across companies (every consumer product has search/chec
 
 ### Multi-role per capability (MVP)
 
-Each capability declares the roles it serves. Example for DoorDash Checkout:
-- `guest` — anonymous checkout
-- `member` — logged-in non-DashPass
-- `dashpass_member` — DashPass subscriber
+Each capability declares the roles it serves. Example for Streamly Playback:
+- `guest` — anonymous preview
+- `member` — logged-in free tier
+- `premium_member` — premium subscriber
 
 The crawler walks the capability once per role using that role's test credentials. The reverse-PRD has a **Flow per role** section; the reverse-Figma-spec scopes screens by role. This roughly doubles crawl complexity for any capability with two declared roles, but matches how enterprise apps actually behave — and ungrounded single-role simulation would mislead the customer.
 
@@ -146,10 +146,10 @@ featurepacks/
     └── <snapshot_version>/             # e.g., 2026-W21
         ├── manifest.json
         ├── capabilities/
-        │   ├── reorder/
+        │   ├── continue-watching/
         │   │   ├── reverse-prd.md
         │   │   └── reverse-figma.json
-        │   ├── checkout/
+        │   ├── playback/
         │   │   ├── reverse-prd.md
         │   │   └── reverse-figma.json
         │   └── ...
@@ -185,9 +185,9 @@ Screens, transitions, copy, components, states, role-gated content. Always crawl
 
 ## How the artifact is consumed by Sidira
 
-When a PM submits a hypothesis ("add a reorder button to the homepage for late-night munchers"):
+When a PM submits a hypothesis ("add a Continue Watching row to the homepage for lapsed bingers"):
 
-1. Sidira parses the hypothesis → identifies affected capabilities ("Reorder", "Homepage")
+1. Sidira parses the hypothesis → identifies affected capabilities ("Continue Watching", "Homepage")
 2. Pulls the relevant reverse-PRDs + reverse-Figma-specs from the latest snapshot
 3. Pulls the relevant personas from the customer's persona pack
 4. Splices everything into the persona prompt:
@@ -218,7 +218,7 @@ The snapshot version is recorded on the simulation result. Re-running an old hyp
 
 | Item | Notes |
 |---|---|
-| LLM synthesis quality (phase 2) | Need to validate clustering produces PM-recognizable capabilities. Test on DoorDash sandbox before promising it to customers. |
+| LLM synthesis quality (phase 2) | Need to validate clustering produces PM-recognizable capabilities. Test on the Streamly sandbox before promising it to customers. |
 | Role explosion | Customer with 8 roles × 10 capabilities = 80 crawl walks. May need to constrain to "primary role + 2 variants" per capability. |
 | Sandbox parity with prod | Sandbox may lack feature flags, real data shapes, or third-party integrations. Document as a known limitation; offer prod read-only crawls for high-trust customers. |
 | Diff churn | UI A/B tests in the sandbox will produce spurious diffs week-to-week. Need a "ignore experimental flags" mechanism. |

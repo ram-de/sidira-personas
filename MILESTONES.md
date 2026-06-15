@@ -11,10 +11,10 @@
 
 ## This repo's current state
 
-- ✅ Round 1 personas (6 personas via Groq llama-3.3-70b naming, stability 0.670)
-- 🔲 Round 2 enrichment — Pricing PSM, loyalty, Hub Notifications, UPSS lifestage. Should push stability >0.75 and split P03/P06.
+- ✅ LLM-first persona naming (Groq → Anthropic) with a generic numeric fallback
+- ✅ Persona Pack schema v1.1 (additive: full centroids, within-cluster scale, sampleable rows, soft posteriors)
 - 🔲 R2 artifact integration (writing to the same R2 layout the simulator reads from)
-- 🔲 Schema v1.1 with validation
-- 🔲 Per-cluster stats emission (optional input for simulator Phase 2.5 variance modeling)
+- 🔲 Per-cluster Jaccard stability + train/test holdout
+- 🔲 Persona methodology rebuild (feature ontology + validation protocol)
 
 Specs and ticket detail live in the GitHub Project under repo:sidira-personas.

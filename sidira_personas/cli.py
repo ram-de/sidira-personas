@@ -270,7 +270,7 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
         )
     else:
         scope_parts.append(f"Baseline = all {len(df):,} users in the sample")
-    scope_parts.append("This is a sample, not the full DoorDash population.")
+    scope_parts.append(f"This is a sample, not the full {cfg['company_id']} population.")
     baseline_scope = " | ".join(scope_parts)
     baseline_n = len(df)
 
@@ -287,7 +287,7 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
         )
         (out / "prompts" / f"{p.id}.md").write_text(prompt)
 
-    user_id_col = src.get("user_id_column", "consumer_id")
+    user_id_col = src.get("user_id_column", "user_id")
     assignments = pd.DataFrame({
         user_id_col: df[user_id_col].values if user_id_col in df.columns else range(len(df)),
         "persona_id": [f"P{c+1:02d}" for c in labels],
