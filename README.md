@@ -38,6 +38,21 @@ pip install -e .
 sidira-personas run --config config/<company>.yaml
 ```
 
+### Try it end-to-end (no Snowflake, no API key)
+
+A fully synthetic fixture ships in-repo so the whole pipeline is runnable and
+CI-testable without any real data (the real-company `config/`/`samples/` were
+purged in #9):
+
+```bash
+python fixtures/synthetic_company.py                          # (re)materialize the parquet
+sidira-personas run --config config/synthetic.yaml --no-llm   # run all 6 layers
+```
+
+The fixture embeds 4 separable latent segments + a lifecycle prefilter (non-Active
+rows → FIXED_* personas) and exercises every adapter type. `tests/test_pipeline_smoke.py`
+drives this same path and asserts the v1.1 + #7 pack contract end-to-end (#12).
+
 Outputs land in `outputs/<run_id>/`:
 - `persona_pack.json`
 - `prompts/P01.md … P0N.md`
