@@ -17,8 +17,14 @@ def fit_gmm_bic(X: np.ndarray, k_range: tuple[int, int], random_state: int = 42)
     return best_model, best_k
 
 
-def assign(model: GaussianMixture, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    labels = model.predict(X)
+def assign(model: GaussianMixture, X: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Hard labels, max-posterior confidence, AND the full soft posterior matrix.
+
+    The posterior vectors (rows sum to 1.0) are carried downstream so the pack can emit each
+    persona's mean soft-membership and assignments.parquet can record per-user posteriors —
+    the GMM already computes them; v1.0 discarded everything but the max (#7 soft posteriors).
+    """
     probs = model.predict_proba(X)
+    labels = probs.argmax(axis=1)
     confidence = probs.max(axis=1)
-    return labels, confidence
+    return labels, confidence, probs

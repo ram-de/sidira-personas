@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
-import os
 from dataclasses import asdict
 from pathlib import Path
 
@@ -17,6 +15,7 @@ from .cluster import assign, fit_gmm_bic
 from .compile_prompts import compile_prompt, generic_fallback_name, llm_name, llm_provider_in_use
 from .encoder import encode_all
 from .io import read_local, read_snowflake
+from .sampling import cluster_centroid_and_scale, population_bounds, sample_synthetic_rows
 from .schema import PERSONA_PACK_SCHEMA_VERSION, FeatureDelta, Persona, PersonaPack, PersonaWeights
 
 
@@ -79,8 +78,14 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
     click.echo("[4/6] Layer C — clustering (GMM + BIC) …")
     k_range = tuple(cfg["cluster"]["k_range"])
     gmm, k = fit_gmm_bic(X, k_range, cfg["cluster"]["random_state"])
-    labels, confidence = assign(gmm, X)
+    labels, confidence, probs = assign(gmm, X)
     click.echo(f"      selected k = {k}")
+
+    # v1.1 sampling config (defaults work with no config edits): N synthetic rows per persona +
+    # the RNG seed for reproducible draws. See sampling.py / schema.py for the §2 step-2 contract.
+    sampling_cfg = cfg.get("sampling") or {}
+    n_synth = int(sampling_cfg.get("n_synthetic_rows", 64))
+    synth_seed = int(sampling_cfg.get("random_state", cfg["cluster"]["random_state"]))
 
     click.echo("[5/6] Layer D — calibrating (weights + bootstrap stability) …")
     weights = compute_weights(
@@ -114,6 +119,8 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
 
     personas: list[Persona] = []
     persona_value_maps: dict[str, dict] = {}
+    # Population bounds (full adapted-feature space) clamp every synthetic draw in-distribution.
+    pop_bounds = population_bounds(adapted)
     for cid in sorted(set(labels.tolist())):
         feats = top_distinctive_features(
             adapted, labels, cid,
@@ -130,6 +137,16 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
             named = generic_fallback_name(pid, feats)
         name, desc, jtbd = named
 
+        # v1.1: full centroid + within-cluster scale + joint synthetic rows (adapted-feature space),
+        # plus the mean soft posterior over this cluster's members (component idx j → P{j+1:02d}).
+        centroid_full, feature_scale = cluster_centroid_and_scale(adapted, labels, cid)
+        sample_rows = sample_synthetic_rows(
+            adapted, labels, cid, n_rows=n_synth, random_state=synth_seed + int(cid),
+            bounds=pop_bounds,
+        )
+        post = probs[labels == cid].mean(axis=0)
+        posterior_mean = {f"P{j+1:02d}": float(post[j]) for j in range(post.shape[0])}
+
         persona = Persona(
             id=pid,
             name=name,
@@ -140,6 +157,10 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
             stability=overall_stability,
             top_features=[FeatureDelta(**f) for f in feats],
             centroid={f["feature"]: f["centroid_value"] for f in feats},
+            centroid_full=centroid_full,
+            feature_scale=feature_scale,
+            sample_rows=sample_rows,
+            posterior_mean=posterior_mean,
         )
         personas.append(persona)
         persona_value_maps[pid] = pvals
@@ -150,7 +171,12 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
         fixed_groups = list(excluded_df[pre["column"]].unique())
         fixed_label_map = {v: i for i, v in enumerate(fixed_groups)}
         fixed_labels = excluded_df[pre["column"]].map(fixed_label_map).to_numpy()
-        fixed_profile = profile_clusters(excluded_df.reset_index(drop=True), groups, fixed_labels)
+        excluded_reset = excluded_df.reset_index(drop=True)
+        fixed_profile = profile_clusters(excluded_reset, groups, fixed_labels)
+        # Adapt the excluded population so FIXED_* personas carry the same v1.1 fields as discovered
+        # ones (computed within their own distribution; they never went through the GMM, so no posterior).
+        adapted_excluded = adapt_all(excluded_reset, groups, snapshot=snapshot)
+        fixed_bounds = population_bounds(adapted_excluded)
         # Compute distinctive features by comparing fixed-persona means to the CLUSTERING baseline
         for fixed_val in fixed_groups:
             cid = fixed_label_map[fixed_val]
@@ -192,6 +218,12 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
                     "(not generated — LLM unavailable)",
                 )
             f_name, f_desc, f_jtbd = fixed_named
+            f_centroid_full, f_feature_scale = cluster_centroid_and_scale(
+                adapted_excluded, fixed_labels, cid)
+            f_sample_rows = sample_synthetic_rows(
+                adapted_excluded, fixed_labels, cid, n_rows=n_synth,
+                random_state=synth_seed + 1000 + int(cid), bounds=fixed_bounds,
+            )
             personas.append(Persona(
                 id=persona_id,
                 name=f_name,
@@ -202,6 +234,10 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
                 stability=1.0,
                 top_features=[FeatureDelta(**f) for f in tf_candidates],
                 centroid={f["feature"]: f["centroid_value"] for f in tf_candidates},
+                centroid_full=f_centroid_full,
+                feature_scale=f_feature_scale,
+                sample_rows=f_sample_rows,
+                posterior_mean=None,  # hard-defined segment, no GMM posterior
             ))
             persona_value_maps[persona_id] = pvals
 
@@ -257,6 +293,10 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
         "persona_id": [f"P{c+1:02d}" for c in labels],
         "confidence": confidence,
     })
+    # v1.1: carry the full soft posterior through to disk (one post_P* column per GMM component),
+    # not just the max-confidence — the #7 "persist the posterior end-to-end" deliverable.
+    for j in range(probs.shape[1]):
+        assignments[f"post_P{j+1:02d}"] = probs[:, j]
     assignments.to_parquet(out / "assignments.parquet", index=False)
 
     baseline_col = cfg.get("baseline_segment_column")
