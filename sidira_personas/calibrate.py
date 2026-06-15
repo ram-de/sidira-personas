@@ -49,15 +49,20 @@ def bootstrap_stability(X: np.ndarray, k: int, iters: int = 30,
 
 def per_cluster_jaccard(X: np.ndarray, base_labels: np.ndarray, k: int,
                         iters: int = 30, random_state: int = 42) -> dict[int, float]:
-    """Hennig clusterboot-style per-cluster stability (Jaccard bootstrap).
+    """Bootstrap Jaccard stability per cluster (clusterboot-style, classify-all variant).
 
-    For each bootstrap resample we refit the GMM, classify the *full* dataset with the refit
+    For each bootstrap resample we refit the GMM, **classify the full dataset** with the refit
     model, and for every base cluster record its maximum Jaccard overlap with any bootstrap
     cluster. The per-cluster score is the mean of those maxima across ``iters`` resamples.
 
+    Note this is a model-refit stability diagnostic: unlike Hennig's original clusterboot — which
+    compares cluster recovery on the *resampled* observation set — we score recovery over all
+    original points using the refit model. That can read more optimistically for extrapolative
+    GMM boundaries; we adopt only Hennig's *interpretation bands* (see :func:`jaccard_verdict`),
+    not the exact resampling protocol.
+
     This surfaces what the global mean-ARI hides: a 0.67 overall can be 2–3 solid clusters
-    (≥0.85) plus 2–3 artifacts (≤0.5). Hennig's interpretation bands are applied by
-    :func:`jaccard_verdict`. Returns ``{cluster_id: mean_max_jaccard}`` over ``range(k)``.
+    (≥0.85) plus 2–3 artifacts (≤0.5). Returns ``{cluster_id: mean_max_jaccard}`` over ``range(k)``.
     """
     rng = np.random.default_rng(random_state)
     n = len(X)
@@ -86,7 +91,7 @@ def per_cluster_jaccard(X: np.ndarray, base_labels: np.ndarray, k: int,
 
 
 def jaccard_verdict(score: float) -> str:
-    """Hennig clusterboot interpretation bands for a per-cluster Jaccard stability."""
+    """Hennig's interpretation bands for a bootstrap Jaccard stability score."""
     if score >= 0.85:
         return "highly stable"
     if score >= 0.75:
@@ -124,11 +129,22 @@ def holdout_evaluation(X: np.ndarray, k: int, test_frac: float = 0.2,
     train split and report the held-out average log-likelihood plus the train↔test cluster-
     proportion drift (total-variation distance). A large ``loglik_gap`` or ``proportion_tv``
     flags an overfit / non-generalizing k. Deterministic given ``random_state``.
+
+    Guards a degenerate split: a GMM needs ``n_samples >= n_components``, so we clamp the test
+    size to leave ``>= k`` training rows, and skip entirely (returning a ``skipped`` reason rather
+    than raising) when the dataset is too small for a holdout at this ``k`` — reachable via
+    ``--limit``, heavy prefiltering, or a high ``holdout_frac``.
     """
     n = len(X)
+    if n <= k:
+        return {
+            "skipped": f"too few rows (n={n}) for a holdout at k={k}",
+            "test_frac": float(test_frac), "n_train": int(n), "n_test": 0,
+        }
     rng = np.random.default_rng(random_state)
     perm = rng.permutation(n)
     n_test = max(1, int(round(n * test_frac)))
+    n_test = min(n_test, n - k)  # guarantee >= k training rows for GaussianMixture.fit
     test_idx, train_idx = perm[:n_test], perm[n_test:]
     Xtr, Xte = X[train_idx], X[test_idx]
     gmm = GaussianMixture(n_components=k, covariance_type="full",

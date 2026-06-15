@@ -112,13 +112,13 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
         click.secho(f"      WARNING: overall stability below threshold {cfg['cluster']['stability_threshold']}",
                     fg="yellow")
 
-    # #7: per-cluster Jaccard (Hennig clusterboot) replaces the global-ARI-only signal —
+    # #7: per-cluster bootstrap Jaccard (clusterboot-style) replaces the global-ARI-only signal —
     # it tells which clusters are solid (≥0.85) vs artifacts (≤0.5), which the mean hides.
     jaccard = per_cluster_jaccard(
         X, labels, k, iters=cfg["cluster"]["bootstrap_iters"],
         random_state=cfg["cluster"]["random_state"],
     )
-    click.echo("      per-cluster Jaccard stability (Hennig clusterboot):")
+    click.echo("      per-cluster Jaccard stability (bootstrap, clusterboot-style):")
     for cid in sorted(jaccard):
         v = jaccard[cid]
         verdict = jaccard_verdict(v)
@@ -294,9 +294,10 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
         overall_stability=overall_stability,
         notes={
             "stability_method": (
-                "per_cluster_jaccard (Hennig clusterboot): per-persona stability lives on "
-                "Persona.stability; bands ≥0.85 highly stable, ≥0.75 valid, ≤0.5 dissolved. "
-                "overall_stability is the coarse mean-ARI, retained for back-compat."
+                "per_cluster_jaccard (bootstrap Jaccard, clusterboot-style classify-all variant; "
+                "Hennig interpretation bands): per-persona stability lives on Persona.stability; "
+                "bands ≥0.85 highly stable, ≥0.75 valid, ≤0.5 dissolved. overall_stability is the "
+                "coarse mean-ARI, retained for back-compat."
             ),
             "per_cluster_jaccard": {f"P{c+1:02d}": jaccard[c] for c in sorted(jaccard)},
             "holdout": holdout,

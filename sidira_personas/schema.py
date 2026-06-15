@@ -61,7 +61,8 @@ class Persona:
     # old hard-coded 1.0 was a fiction). ``stability_verdict`` is its interpretation band.
     stability_verdict: str | None = None
     # Normalized entropy of ``posterior_mean`` (0 = crisp identity, 1 = maximally mixed); ``None``
-    # for FIXED_* personas. Surfaces the variance-collapse risk of treating a soft cluster as crisp.
+    # for FIXED_* personas. Measures assignment ambiguity / cluster overlap — a high value means a
+    # falsely-crisp identity, which is what collapses downstream simulated-agent variance.
     posterior_entropy: float | None = None
 
 

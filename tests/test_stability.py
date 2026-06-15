@@ -109,3 +109,22 @@ def test_holdout_proportion_drift_small_for_clean_clusters():
 def test_holdout_is_deterministic():
     X, _labels, k = _blobs([0.0, 10.0], n=100, seed=6)
     assert holdout_evaluation(X, k, random_state=11) == holdout_evaluation(X, k, random_state=11)
+
+
+def test_holdout_skips_when_too_few_rows_for_k():
+    """n <= k cannot support a holdout — return a skip marker, never raise."""
+    X = np.random.default_rng(0).normal(size=(4, 3))
+    h = holdout_evaluation(X, k=5, test_frac=0.2, random_state=0)
+    assert "skipped" in h
+    assert h["n_test"] == 0
+
+
+def test_holdout_clamps_test_size_to_keep_k_train_rows():
+    """A high holdout_frac must still leave >= k training rows (GaussianMixture needs n>=k)."""
+    X = np.random.default_rng(1).normal(size=(10, 3))
+    X[5:] += 8.0  # two loose blobs
+    h = holdout_evaluation(X, k=3, test_frac=0.95, random_state=0)
+    assert "skipped" not in h
+    assert h["n_train"] >= 3
+    assert h["n_train"] + h["n_test"] == len(X)
+    assert np.isfinite(h["test_avg_loglik"])
