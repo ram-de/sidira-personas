@@ -10,7 +10,16 @@ import pandas as pd
 import yaml
 
 from .adapter import adapt_all
-from .calibrate import bootstrap_stability, compute_weights, profile_clusters, top_distinctive_features
+from .calibrate import (
+    bootstrap_stability,
+    compute_weights,
+    holdout_evaluation,
+    jaccard_verdict,
+    per_cluster_jaccard,
+    posterior_entropy,
+    profile_clusters,
+    top_distinctive_features,
+)
 from .cluster import assign, fit_gmm_bic
 from .compile_prompts import compile_prompt, generic_fallback_name, llm_name, llm_provider_in_use
 from .encoder import encode_all
@@ -98,10 +107,33 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
         X, k, iters=cfg["cluster"]["bootstrap_iters"],
         random_state=cfg["cluster"]["random_state"],
     )
-    click.echo(f"      overall stability (mean ARI): {overall_stability:.3f}")
+    click.echo(f"      overall stability (mean ARI, coarse): {overall_stability:.3f}")
     if overall_stability < cfg["cluster"]["stability_threshold"]:
-        click.secho(f"      WARNING: stability below threshold {cfg['cluster']['stability_threshold']}",
+        click.secho(f"      WARNING: overall stability below threshold {cfg['cluster']['stability_threshold']}",
                     fg="yellow")
+
+    # #7: per-cluster Jaccard (Hennig clusterboot) replaces the global-ARI-only signal —
+    # it tells which clusters are solid (≥0.85) vs artifacts (≤0.5), which the mean hides.
+    jaccard = per_cluster_jaccard(
+        X, labels, k, iters=cfg["cluster"]["bootstrap_iters"],
+        random_state=cfg["cluster"]["random_state"],
+    )
+    click.echo("      per-cluster Jaccard stability (Hennig clusterboot):")
+    for cid in sorted(jaccard):
+        v = jaccard[cid]
+        verdict = jaccard_verdict(v)
+        line = f"        P{cid+1:02d}: {v:.3f}  [{verdict}]"
+        click.secho(line, fg="yellow" if v <= 0.5 else None)
+
+    # #7: train/test holdout — evidence the clustering generalizes (diagnostic; the shipped
+    # pack still fits on all rows). test_frac defaults to 0.2; no config edit required.
+    holdout = holdout_evaluation(
+        X, k, test_frac=float(cfg["cluster"].get("holdout_frac", 0.2)),
+        random_state=cfg["cluster"]["random_state"],
+    )
+    click.echo(f"      holdout: train/test avg log-lik {holdout['train_avg_loglik']:.2f}/"
+               f"{holdout['test_avg_loglik']:.2f} (gap {holdout['loglik_gap']:.2f}), "
+               f"proportion drift {holdout['proportion_tv_distance']:.3f}")
 
     click.echo("      computing cluster profiles in original feature units …")
     profile = profile_clusters(df, groups, labels)
@@ -147,6 +179,7 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
         post = probs[labels == cid].mean(axis=0)
         posterior_mean = {f"P{j+1:02d}": float(post[j]) for j in range(post.shape[0])}
 
+        jac = jaccard.get(int(cid), 0.0)
         persona = Persona(
             id=pid,
             name=name,
@@ -154,13 +187,15 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
             jtbd=jtbd,
             size=int((labels == cid).sum()),
             weights=PersonaWeights(**weights[cid]),
-            stability=overall_stability,
+            stability=jac,  # #7: per-cluster Jaccard, not the global ARI
             top_features=[FeatureDelta(**f) for f in feats],
             centroid={f["feature"]: f["centroid_value"] for f in feats},
             centroid_full=centroid_full,
             feature_scale=feature_scale,
             sample_rows=sample_rows,
             posterior_mean=posterior_mean,
+            stability_verdict=jaccard_verdict(jac),
+            posterior_entropy=posterior_entropy(posterior_mean),
         )
         personas.append(persona)
         persona_value_maps[pid] = pvals
@@ -231,13 +266,15 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
                 jtbd=f_jtbd,
                 size=int(len(sub)),
                 weights=PersonaWeights(**w),
-                stability=1.0,
+                stability=None,  # #7: hard-defined segment — no GMM bootstrap applies (was a fake 1.0)
                 top_features=[FeatureDelta(**f) for f in tf_candidates],
                 centroid={f["feature"]: f["centroid_value"] for f in tf_candidates},
                 centroid_full=f_centroid_full,
                 feature_scale=f_feature_scale,
                 sample_rows=f_sample_rows,
                 posterior_mean=None,  # hard-defined segment, no GMM posterior
+                stability_verdict="n/a (hard-defined)",
+                posterior_entropy=None,
             ))
             persona_value_maps[persona_id] = pvals
 
@@ -255,6 +292,15 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
         encoder_method=cfg["encoder"]["method"],
         embedding_dim_per_group=dim,
         overall_stability=overall_stability,
+        notes={
+            "stability_method": (
+                "per_cluster_jaccard (Hennig clusterboot): per-persona stability lives on "
+                "Persona.stability; bands ≥0.85 highly stable, ≥0.75 valid, ≤0.5 dissolved. "
+                "overall_stability is the coarse mean-ARI, retained for back-compat."
+            ),
+            "per_cluster_jaccard": {f"P{c+1:02d}": jaccard[c] for c in sorted(jaccard)},
+            "holdout": holdout,
+        },
     )
     pack.to_json(str(out / "persona_pack.json"))
 

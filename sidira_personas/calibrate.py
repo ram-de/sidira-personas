@@ -28,6 +28,12 @@ def compute_weights(df: pd.DataFrame, labels: np.ndarray, schemes: list[str],
 
 def bootstrap_stability(X: np.ndarray, k: int, iters: int = 30,
                         random_state: int = 42) -> float:
+    """Coarse pack-level stability: mean ARI between the base clustering and bootstrap refits.
+
+    Retained for back-compat as ``PersonaPack.overall_stability``. It is a single global number
+    that hides which clusters are solid and which are artifacts — use :func:`per_cluster_jaccard`
+    for the per-persona signal that actually gates downstream simulation (#7).
+    """
     rng = np.random.default_rng(random_state)
     base = GaussianMixture(n_components=k, covariance_type="full",
                            random_state=random_state, n_init=1).fit(X).predict(X)
@@ -39,6 +45,108 @@ def bootstrap_stability(X: np.ndarray, k: int, iters: int = 30,
         pred = gmm.predict(X)
         scores.append(adjusted_rand_score(base, pred))
     return float(np.mean(scores))
+
+
+def per_cluster_jaccard(X: np.ndarray, base_labels: np.ndarray, k: int,
+                        iters: int = 30, random_state: int = 42) -> dict[int, float]:
+    """Hennig clusterboot-style per-cluster stability (Jaccard bootstrap).
+
+    For each bootstrap resample we refit the GMM, classify the *full* dataset with the refit
+    model, and for every base cluster record its maximum Jaccard overlap with any bootstrap
+    cluster. The per-cluster score is the mean of those maxima across ``iters`` resamples.
+
+    This surfaces what the global mean-ARI hides: a 0.67 overall can be 2–3 solid clusters
+    (≥0.85) plus 2–3 artifacts (≤0.5). Hennig's interpretation bands are applied by
+    :func:`jaccard_verdict`. Returns ``{cluster_id: mean_max_jaccard}`` over ``range(k)``.
+    """
+    rng = np.random.default_rng(random_state)
+    n = len(X)
+    base_sets = {c: set(np.flatnonzero(base_labels == c).tolist()) for c in range(k)}
+    acc: dict[int, list[float]] = {c: [] for c in range(k)}
+    for _ in range(iters):
+        idx = rng.choice(n, size=n, replace=True)
+        gmm = GaussianMixture(n_components=k, covariance_type="full",
+                              random_state=int(rng.integers(0, 1_000_000)), n_init=1).fit(X[idx])
+        boot_labels = gmm.predict(X)
+        boot_sets = [set(np.flatnonzero(boot_labels == j).tolist()) for j in range(k)]
+        for c, s in base_sets.items():
+            if not s:
+                acc[c].append(0.0)
+                continue
+            best = 0.0
+            for t in boot_sets:
+                if not t:
+                    continue
+                union = len(s | t)
+                j = (len(s & t) / union) if union else 0.0
+                if j > best:
+                    best = j
+            acc[c].append(best)
+    return {c: (float(np.mean(v)) if v else 0.0) for c, v in acc.items()}
+
+
+def jaccard_verdict(score: float) -> str:
+    """Hennig clusterboot interpretation bands for a per-cluster Jaccard stability."""
+    if score >= 0.85:
+        return "highly stable"
+    if score >= 0.75:
+        return "valid"
+    if score > 0.5:
+        return "unstable"
+    return "dissolved"
+
+
+def posterior_entropy(posterior) -> float:
+    """Normalized Shannon entropy of a soft-posterior vector, in [0, 1].
+
+    0.0 = a crisp, single-component identity; 1.0 = uniform across all components (maximally
+    mixed). Accepts a ``{persona_id: prob}`` dict or a sequence. Normalized by ``log(k)`` so it
+    is comparable across packs with different ``k`` (#7 "posterior entropy" honesty field).
+    """
+    vals = list(posterior.values()) if isinstance(posterior, dict) else list(posterior)
+    p = np.asarray(vals, dtype=float)
+    k = p.size
+    if k <= 1:
+        return 0.0
+    p = p[p > 0]
+    if p.size == 0:
+        return 0.0
+    h = float(-np.sum(p * np.log(p)))
+    return h / float(np.log(k))
+
+
+def holdout_evaluation(X: np.ndarray, k: int, test_frac: float = 0.2,
+                       random_state: int = 42) -> dict:
+    """Train/test generalization diagnostic for the GMM at the selected ``k``.
+
+    A *diagnostic*, not the shipped fit: the production pack still fits on all rows, but with no
+    holdout there was no evidence the clustering generalizes (#7 "add a holdout"). We fit on a
+    train split and report the held-out average log-likelihood plus the train↔test cluster-
+    proportion drift (total-variation distance). A large ``loglik_gap`` or ``proportion_tv``
+    flags an overfit / non-generalizing k. Deterministic given ``random_state``.
+    """
+    n = len(X)
+    rng = np.random.default_rng(random_state)
+    perm = rng.permutation(n)
+    n_test = max(1, int(round(n * test_frac)))
+    test_idx, train_idx = perm[:n_test], perm[n_test:]
+    Xtr, Xte = X[train_idx], X[test_idx]
+    gmm = GaussianMixture(n_components=k, covariance_type="full",
+                          random_state=random_state, n_init=3, max_iter=200).fit(Xtr)
+    train_ll = float(gmm.score(Xtr))
+    test_ll = float(gmm.score(Xte))
+    ktr = np.bincount(gmm.predict(Xtr), minlength=k) / len(Xtr)
+    kte = np.bincount(gmm.predict(Xte), minlength=k) / len(Xte)
+    tv = float(0.5 * np.abs(ktr - kte).sum())
+    return {
+        "test_frac": float(test_frac),
+        "n_train": int(len(train_idx)),
+        "n_test": int(len(test_idx)),
+        "train_avg_loglik": train_ll,
+        "test_avg_loglik": test_ll,
+        "loglik_gap": float(train_ll - test_ll),
+        "proportion_tv_distance": tv,
+    }
 
 
 def _format_value(v, name: str) -> str:

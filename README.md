@@ -61,7 +61,7 @@ To force the fallback path: `sidira-personas run --config <yaml> --no-llm`.
 
 ## Follow-ups
 
-1. **Per-cluster stability.** Bootstrap stability is currently a single overall ARI. Switch to per-cluster Jaccard so unstable clusters can be flagged individually, plus a train/test holdout.
+1. **Per-cluster stability.** ✅ **landed** (ram-de/sidira-personas#7). Per-cluster **Jaccard** (Hennig clusterboot) replaces the global-ARI-only signal — each discovered persona carries its own `stability` + `stability_verdict` (≥0.85 highly stable, ≥0.75 valid, ≤0.5 dissolved), `posterior_entropy` surfaces variance-collapse risk, and FIXED_* personas no longer fake `stability=1.0` (now `None`). A **train/test holdout** diagnostic (held-out log-likelihood + proportion drift) lands in `persona_pack.json` `notes`. `overall_stability` (mean ARI) is retained as a coarse back-compat number.
 2. **HTML diagnostic report.** BIC curve, weight distributions, t-SNE scatter of the embedding colored by cluster, baseline crosstab. Useful before any cluster ships to Sidira.
 3. **Per-cluster orders/revenue concentration alerts.** When a small cluster carries an outsized share of value (headcount share ≪ value share), the Persona Pack should surface that as a "high leverage" flag for simulation cohort selection.
 4. **Schema versioning.** ✅ **v1.1 landed** (additive) to unblock the simulator's per-agent individual-row
@@ -69,7 +69,7 @@ To force the fallback path: `sidira-personas run --config <yaml> --no-llm`.
    features), `feature_scale` (within-cluster std — the step-2 z-score denominator), `sample_rows` (N
    covariance-aware synthetic rows, privacy-clean), and `posterior_mean` (mean GMM soft membership; `None`
    for FIXED_* personas). `assignments.parquet` also gains `post_P*` soft-posterior columns. The fields are
-   additive (defaulted), so v1.0 packs still parse. *Follow-up (left on #7):* per-cluster Jaccard stability +
-   train/test holdout.
+   additive (defaulted), so v1.0 packs still parse. The same v1.1 line later gained the #7 honesty fields
+   (`stability_verdict`, `posterior_entropy`, nullable `stability`) — additive, so old consumers ignore them.
 5. **Methodology rebuild.** Reconceive the feature ontology, segmentation method, synthetic-individual
    generation, and validation protocol from first principles — see the methodology doc (in progress).
