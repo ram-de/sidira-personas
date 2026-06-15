@@ -1,31 +1,19 @@
-"""CLI entry point: sidira-personas run --config config/<company>.yaml"""
+"""CLI entry point: sidira-personas run --config config/<company>.yaml
+
+Thin wrapper over :func:`sidira_personas.pipeline.run_pipeline`: this layer owns
+source reading (Snowflake/local + ``--limit``) and artifact writing (run dir,
+prompts, parquet, crosstab); all the modelling lives in ``run_pipeline``.
+"""
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import asdict
 from pathlib import Path
 
 import click
-import pandas as pd
 import yaml
 
-from .adapter import adapt_all
-from .calibrate import (
-    bootstrap_stability,
-    compute_weights,
-    holdout_evaluation,
-    jaccard_verdict,
-    per_cluster_jaccard,
-    posterior_entropy,
-    profile_clusters,
-    top_distinctive_features,
-)
-from .cluster import assign, fit_gmm_bic
-from .compile_prompts import compile_prompt, generic_fallback_name, llm_name, llm_provider_in_use
-from .encoder import encode_all
 from .io import read_local, read_snowflake
-from .sampling import cluster_centroid_and_scale, population_bounds, sample_synthetic_rows
-from .schema import PERSONA_PACK_SCHEMA_VERSION, FeatureDelta, Persona, PersonaPack, PersonaWeights
+from .pipeline import run_pipeline
 
 
 @click.group()
@@ -55,308 +43,20 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
         df = df.head(limit)
     click.echo(f"      {len(df):,} rows, {df.shape[1]} columns")
 
-    pre = cfg.get("prefilter")
-    excluded_df = None
-    if pre:
-        col, vals = pre["column"], pre["values"]
-        if col in df.columns:
-            mask = df[col].isin(vals)
-            excluded_df = df.loc[~mask].copy()
-            df = df.loc[mask].copy().reset_index(drop=True)
-            click.echo(f"      prefilter {col} ∈ {vals}: kept {len(df):,}, set aside {len(excluded_df):,}")
+    result = run_pipeline(df, cfg, run_id=run_id, no_llm=no_llm, log=click.echo)
 
-    click.echo("[2/6] Layer A — adapting per group …")
-    groups = {g: specs for g, specs in cfg["feature_groups"].items()}
-    snapshot_col = cfg.get("snapshot_date_column")
-    snapshot = None
-    if snapshot_col and snapshot_col in df.columns:
-        snapshot = pd.to_datetime(df[snapshot_col]).max()
-    adapted = adapt_all(df, groups, snapshot=snapshot)
-    for g, feats in adapted.items():
-        click.echo(f"      {g}: {feats.shape[1]} features")
+    result.pack.to_json(str(out / "persona_pack.json"))
+    for pid, prompt in result.prompts.items():
+        (out / "prompts" / f"{pid}.md").write_text(prompt)
+    result.assignments.to_parquet(out / "assignments.parquet", index=False)
 
-    click.echo("[3/6] Layer B — encoding per group …")
-    dim = cfg["encoder"]["embedding_dim_per_group"]
-    excluded_groups = set(cfg.get("clustering_exclude_groups") or [])
-    adapted_for_cluster = {g: f for g, f in adapted.items() if g not in excluded_groups}
-    if excluded_groups:
-        click.echo(f"      excluding from embedding: {sorted(excluded_groups)}")
-    X, _models = encode_all(adapted_for_cluster, dim)
-    click.echo(f"      embedding shape: {X.shape}")
-
-    click.echo("[4/6] Layer C — clustering (GMM + BIC) …")
-    k_range = tuple(cfg["cluster"]["k_range"])
-    gmm, k = fit_gmm_bic(X, k_range, cfg["cluster"]["random_state"])
-    labels, confidence, probs = assign(gmm, X)
-    click.echo(f"      selected k = {k}")
-
-    # v1.1 sampling config (defaults work with no config edits): N synthetic rows per persona +
-    # the RNG seed for reproducible draws. See sampling.py / schema.py for the §2 step-2 contract.
-    sampling_cfg = cfg.get("sampling") or {}
-    n_synth = int(sampling_cfg.get("n_synthetic_rows", 64))
-    synth_seed = int(sampling_cfg.get("random_state", cfg["cluster"]["random_state"]))
-
-    click.echo("[5/6] Layer D — calibrating (weights + bootstrap stability) …")
-    weights = compute_weights(
-        df, labels,
-        cfg["weights"]["schemes"],
-        cfg["weights"].get("orders_column"),
-        cfg["weights"].get("revenue_column"),
-    )
-    overall_stability = bootstrap_stability(
-        X, k, iters=cfg["cluster"]["bootstrap_iters"],
-        random_state=cfg["cluster"]["random_state"],
-    )
-    click.echo(f"      overall stability (mean ARI, coarse): {overall_stability:.3f}")
-    if overall_stability < cfg["cluster"]["stability_threshold"]:
-        click.secho(f"      WARNING: overall stability below threshold {cfg['cluster']['stability_threshold']}",
-                    fg="yellow")
-
-    # #7: per-cluster bootstrap Jaccard (clusterboot-style) replaces the global-ARI-only signal —
-    # it tells which clusters are solid (≥0.85) vs artifacts (≤0.5), which the mean hides.
-    jaccard = per_cluster_jaccard(
-        X, labels, k, iters=cfg["cluster"]["bootstrap_iters"],
-        random_state=cfg["cluster"]["random_state"],
-    )
-    click.echo("      per-cluster Jaccard stability (bootstrap, clusterboot-style):")
-    for cid in sorted(jaccard):
-        v = jaccard[cid]
-        verdict = jaccard_verdict(v)
-        line = f"        P{cid+1:02d}: {v:.3f}  [{verdict}]"
-        click.secho(line, fg="yellow" if v <= 0.5 else None)
-
-    # #7: train/test holdout — evidence the clustering generalizes (diagnostic; the shipped
-    # pack still fits on all rows). test_frac defaults to 0.2; no config edit required.
-    holdout = holdout_evaluation(
-        X, k, test_frac=float(cfg["cluster"].get("holdout_frac", 0.2)),
-        random_state=cfg["cluster"]["random_state"],
-    )
-    click.echo(f"      holdout: train/test avg log-lik {holdout['train_avg_loglik']:.2f}/"
-               f"{holdout['test_avg_loglik']:.2f} (gap {holdout['loglik_gap']:.2f}), "
-               f"proportion drift {holdout['proportion_tv_distance']:.3f}")
-
-    click.echo("      computing cluster profiles in original feature units …")
-    profile = profile_clusters(df, groups, labels)
-    baseline = profile["baseline"]
-
-    if no_llm:
-        click.echo("      --no-llm flag set → all personas will use generic Persona## names")
-    else:
-        provider = llm_provider_in_use()
-        if provider:
-            click.echo(f"      naming via {provider} (fallback to Persona## on failure)")
-        else:
-            click.secho("      no LLM key (GROQ_API_KEY / ANTHROPIC_API_KEY) → using Persona## names",
-                        fg="yellow")
-
-    personas: list[Persona] = []
-    persona_value_maps: dict[str, dict] = {}
-    # Population bounds (full adapted-feature space) clamp every synthetic draw in-distribution.
-    pop_bounds = population_bounds(adapted)
-    for cid in sorted(set(labels.tolist())):
-        feats = top_distinctive_features(
-            adapted, labels, cid,
-            top_n=cfg["prompt_compiler"]["top_n_distinctive_features_per_group"],
-            threshold_sigma=cfg["prompt_compiler"]["threshold_sigma"],
-        )
-        pid = f"P{cid+1:02d}"
-        pvals = profile["clusters"][int(cid)]
-
-        # Naming: LLM is primary. Falls back to generic Persona## if LLM
-        # is unavailable (no key, network error, etc.) or --no-llm is set.
-        named = None if no_llm else llm_name(cfg["company_id"], pvals, feats)
-        if named is None:
-            named = generic_fallback_name(pid, feats)
-        name, desc, jtbd = named
-
-        # v1.1: full centroid + within-cluster scale + joint synthetic rows (adapted-feature space),
-        # plus the mean soft posterior over this cluster's members (component idx j → P{j+1:02d}).
-        centroid_full, feature_scale = cluster_centroid_and_scale(adapted, labels, cid)
-        sample_rows = sample_synthetic_rows(
-            adapted, labels, cid, n_rows=n_synth, random_state=synth_seed + int(cid),
-            bounds=pop_bounds,
-        )
-        post = probs[labels == cid].mean(axis=0)
-        posterior_mean = {f"P{j+1:02d}": float(post[j]) for j in range(post.shape[0])}
-
-        jac = jaccard.get(int(cid), 0.0)
-        persona = Persona(
-            id=pid,
-            name=name,
-            description=desc,
-            jtbd=jtbd,
-            size=int((labels == cid).sum()),
-            weights=PersonaWeights(**weights[cid]),
-            stability=jac,  # #7: per-cluster Jaccard, not the global ARI
-            top_features=[FeatureDelta(**f) for f in feats],
-            centroid={f["feature"]: f["centroid_value"] for f in feats},
-            centroid_full=centroid_full,
-            feature_scale=feature_scale,
-            sample_rows=sample_rows,
-            posterior_mean=posterior_mean,
-            stability_verdict=jaccard_verdict(jac),
-            posterior_entropy=posterior_entropy(posterior_mean),
-        )
-        personas.append(persona)
-        persona_value_maps[pid] = pvals
-
-    if excluded_df is not None and len(excluded_df) > 0:
-        click.echo(f"      adding {excluded_df[pre['column']].nunique()} fixed personas from prefilter")
-        # Build a fake-labels array over excluded_df so we can reuse profile_clusters
-        fixed_groups = list(excluded_df[pre["column"]].unique())
-        fixed_label_map = {v: i for i, v in enumerate(fixed_groups)}
-        fixed_labels = excluded_df[pre["column"]].map(fixed_label_map).to_numpy()
-        excluded_reset = excluded_df.reset_index(drop=True)
-        fixed_profile = profile_clusters(excluded_reset, groups, fixed_labels)
-        # Adapt the excluded population so FIXED_* personas carry the same v1.1 fields as discovered
-        # ones (computed within their own distribution; they never went through the GMM, so no posterior).
-        adapted_excluded = adapt_all(excluded_reset, groups, snapshot=snapshot)
-        fixed_bounds = population_bounds(adapted_excluded)
-        # Compute distinctive features by comparing fixed-persona means to the CLUSTERING baseline
-        for fixed_val in fixed_groups:
-            cid = fixed_label_map[fixed_val]
-            sub = excluded_df[excluded_df[pre["column"]] == fixed_val]
-            pvals = fixed_profile["clusters"][cid]
-            # Build top-features by computing pseudo-z vs clustering baseline (using baseline distribution std unknown → use rank-order)
-            tf_candidates: list[dict] = []
-            for feat, info in pvals.items():
-                if feat not in baseline:
-                    continue
-                if info.get("kind") in ("count", "score", "ratio", "tenure_days"):
-                    pop_v = baseline[feat]["value"]
-                    delta = info["value"] - pop_v
-                    denom = abs(pop_v) if pop_v else 1.0
-                    z = delta / denom
-                    if abs(z) >= 0.5:
-                        tf_candidates.append({
-                            "feature": feat, "group": info["group"],
-                            "centroid_value": info["value"],
-                            "population_mean": pop_v,
-                            "population_std": denom,
-                            "z_delta": float(z),
-                        })
-            tf_candidates.sort(key=lambda x: abs(x["z_delta"]), reverse=True)
-            tf_candidates = tf_candidates[:15]
-
-            cid_label = f"FIXED_{str(fixed_val).upper().replace(' ', '_')}"
-            w: dict[str, float] = {"by_headcount": float(len(sub) / (len(df) + len(excluded_df)))}
-            orders_col = cfg["weights"].get("orders_column")
-            if orders_col and orders_col in sub.columns:
-                tot_all = float(pd.concat([df, excluded_df])[orders_col].sum()) or 1.0
-                w["by_orders"] = float(sub[orders_col].sum() / tot_all)
-            persona_id = cid_label[:24]
-            fixed_named = None if no_llm else llm_name(cfg["company_id"], pvals, tf_candidates)
-            if fixed_named is None:
-                fixed_named = (
-                    f"Fixed — {fixed_val}",
-                    f"Pre-defined segment from prefilter column {pre['column']} = {fixed_val}. NOT discovered via clustering.",
-                    "(not generated — LLM unavailable)",
-                )
-            f_name, f_desc, f_jtbd = fixed_named
-            f_centroid_full, f_feature_scale = cluster_centroid_and_scale(
-                adapted_excluded, fixed_labels, cid)
-            f_sample_rows = sample_synthetic_rows(
-                adapted_excluded, fixed_labels, cid, n_rows=n_synth,
-                random_state=synth_seed + 1000 + int(cid), bounds=fixed_bounds,
-            )
-            personas.append(Persona(
-                id=persona_id,
-                name=f_name,
-                description=f_desc,
-                jtbd=f_jtbd,
-                size=int(len(sub)),
-                weights=PersonaWeights(**w),
-                stability=None,  # #7: hard-defined segment — no GMM bootstrap applies (was a fake 1.0)
-                top_features=[FeatureDelta(**f) for f in tf_candidates],
-                centroid={f["feature"]: f["centroid_value"] for f in tf_candidates},
-                centroid_full=f_centroid_full,
-                feature_scale=f_feature_scale,
-                sample_rows=f_sample_rows,
-                posterior_mean=None,  # hard-defined segment, no GMM posterior
-                stability_verdict="n/a (hard-defined)",
-                posterior_entropy=None,
-            ))
-            persona_value_maps[persona_id] = pvals
-
-    click.echo("[6/6] Layer E — compiling prompts + writing artifacts …")
-    pack = PersonaPack(
-        schema_version=PERSONA_PACK_SCHEMA_VERSION,
-        company_id=cfg["company_id"],
-        run_id=run_id,
-        created_at=dt.datetime.utcnow().isoformat(),
-        n_users=int(len(df)),
-        feature_groups=list(groups.keys()),
-        personas=personas,
-        cluster_method=cfg["cluster"]["method"],
-        k_selected=k,
-        encoder_method=cfg["encoder"]["method"],
-        embedding_dim_per_group=dim,
-        overall_stability=overall_stability,
-        notes={
-            "stability_method": (
-                "per_cluster_jaccard (bootstrap Jaccard, clusterboot-style classify-all variant; "
-                "Hennig interpretation bands): per-persona stability lives on Persona.stability; "
-                "bands ≥0.85 highly stable, ≥0.75 valid, ≤0.5 dissolved. overall_stability is the "
-                "coarse mean-ARI, retained for back-compat."
-            ),
-            "per_cluster_jaccard": {f"P{c+1:02d}": jaccard[c] for c in sorted(jaccard)},
-            "holdout": holdout,
-        },
-    )
-    pack.to_json(str(out / "persona_pack.json"))
-
-    # Build an explicit scope label so the LLM knows what "baseline" actually means
-    src = cfg["source"]
-    src_ref = (f"{src.get('database','?')}.{src.get('schema','?')}.{src.get('table','?')}"
-               if src["type"] == "snowflake" else src.get("path", "local file"))
-    scope_parts = [f"Snapshot from {src_ref}", f"{int(len(df)+len(excluded_df) if excluded_df is not None else len(df)):,} users in source"]
-    if pre:
-        scope_parts.append(
-            f"Baseline = the {len(df):,} users where {pre['column']} ∈ {pre['values']} "
-            f"(prefiltered before clustering)"
-        )
-    else:
-        scope_parts.append(f"Baseline = all {len(df):,} users in the sample")
-    scope_parts.append(f"This is a sample, not the full {cfg['company_id']} population.")
-    baseline_scope = " | ".join(scope_parts)
-    baseline_n = len(df)
-
-    for p in personas:
-        pvals = persona_value_maps.get(p.id, {})
-        prompt = compile_prompt(
-            cfg["company_id"],
-            {"name": p.name, "description": p.description, "jtbd": p.jtbd},
-            pvals,
-            baseline,
-            [asdict(f) for f in p.top_features],
-            baseline_scope=baseline_scope,
-            baseline_n=baseline_n,
-        )
-        (out / "prompts" / f"{p.id}.md").write_text(prompt)
-
-    user_id_col = src.get("user_id_column", "user_id")
-    assignments = pd.DataFrame({
-        user_id_col: df[user_id_col].values if user_id_col in df.columns else range(len(df)),
-        "persona_id": [f"P{c+1:02d}" for c in labels],
-        "confidence": confidence,
-    })
-    # v1.1: carry the full soft posterior through to disk (one post_P* column per GMM component),
-    # not just the max-confidence — the #7 "persist the posterior end-to-end" deliverable.
-    for j in range(probs.shape[1]):
-        assignments[f"post_P{j+1:02d}"] = probs[:, j]
-    assignments.to_parquet(out / "assignments.parquet", index=False)
-
-    baseline_col = cfg.get("baseline_segment_column")
-    if baseline_col and baseline_col in df.columns:
+    if result.baseline_crosstab is not None:
         click.echo("\nBaseline segment vs. discovered persona — crosstab:")
-        ct = pd.crosstab(df[baseline_col].fillna("UNK"),
-                         assignments["persona_id"].values,
-                         margins=True, margins_name="TOTAL")
-        click.echo(ct.to_string())
-        ct.to_csv(out / "baseline_crosstab.csv")
+        click.echo(result.baseline_crosstab.to_string())
+        result.baseline_crosstab.to_csv(out / "baseline_crosstab.csv")
 
     click.echo("\nPersona sizes & weights:")
-    for p in personas:
+    for p in result.pack.personas:
         w = p.weights
         click.echo(f"  {p.id}: n={p.size:>5d}  "
                    f"headcount={w.by_headcount:.3f}  "
