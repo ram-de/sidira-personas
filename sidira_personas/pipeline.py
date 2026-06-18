@@ -66,6 +66,7 @@ def run_pipeline(
     *,
     run_id: str,
     no_llm: bool = False,
+    require_llm: bool = False,
     provider: str | None = None,
     log: Callable[[str], None] = _noop,
 ) -> PipelineResult:
@@ -78,7 +79,39 @@ def run_pipeline(
     naming backend (``"groq"`` / ``"anthropic"``); ``None`` means
     first-available-wins. ``log`` receives progress lines (the CLI passes
     ``click.echo``; the default is a no-op).
+
+    ``require_llm`` (default False) makes LLM naming MANDATORY: the build fails
+    loudly rather than silently shipping a pack whose personas carry the generic
+    ``Persona##`` fallback (raw-stat jargon descriptions, "(not generated)" JTBD).
+    This is the production posture for real-customer packs — downstream behavioral
+    simulation only recovers who-responds-more heterogeneity when the audience is
+    described in plain language (validated: enriched descriptions rank-rho +0.457
+    vs. ~0 for jargon fallbacks), so silently shipping a fallback pack is a
+    correctness landmine, not a cosmetic one. With ``require_llm`` set, a missing
+    key / unreachable provider fails fast BEFORE the expensive clustering run, and
+    any per-persona naming call that returns ``None`` aborts the build with the
+    list of personas that could not be named. Mutually exclusive with ``no_llm``.
     """
+    if require_llm and no_llm:
+        raise ValueError(
+            "require_llm and no_llm are mutually exclusive: require_llm demands "
+            "real LLM naming, no_llm disables it."
+        )
+    if require_llm:
+        # Fail fast before clustering: no provider key (or a forced provider whose
+        # key is absent) means every persona would fall back, so don't burn the run.
+        if llm_provider_in_use(provider) is None:
+            raise RuntimeError(
+                "require_llm is set but no usable LLM naming provider is available "
+                f"(provider={provider!r}). Set GROQ_API_KEY or ANTHROPIC_API_KEY "
+                "(or pick a provider whose key is present) before building a "
+                "real-customer pack, or pass no_llm=True to accept generic names."
+            )
+    # Personas whose LLM naming call returned None despite a usable provider
+    # (mid-build API error). Collected across both naming loops; under
+    # require_llm a non-empty list aborts the build after naming completes.
+    naming_failures: list[str] = []
+
     pre = cfg.get("prefilter")
     excluded_df = None
     if pre:
@@ -187,6 +220,8 @@ def run_pipeline(
         # is unavailable (no key, network error, etc.) or --no-llm is set.
         named = None if no_llm else llm_name(cfg["company_id"], pvals, feats, provider)
         if named is None:
+            if require_llm:
+                naming_failures.append(pid)
             named = generic_fallback_name(pid, feats)
         name, desc, jtbd = named
 
@@ -268,6 +303,8 @@ def run_pipeline(
             persona_id = cid_label[:24]
             fixed_named = None if no_llm else llm_name(cfg["company_id"], pvals, tf_candidates, provider)
             if fixed_named is None:
+                if require_llm:
+                    naming_failures.append(persona_id)
                 fixed_named = (
                     f"Fixed — {fixed_val}",
                     f"Pre-defined segment from prefilter column {pre['column']} = {fixed_val}. NOT discovered via clustering.",
@@ -298,6 +335,16 @@ def run_pipeline(
                 posterior_entropy=None,
             ))
             persona_value_maps[persona_id] = pvals
+
+    if require_llm and naming_failures:
+        raise RuntimeError(
+            "require_llm is set but LLM naming failed for "
+            f"{len(naming_failures)} persona(s) ({', '.join(naming_failures)}) — "
+            "the provider was reachable at preflight but returned no name mid-build "
+            "(API error / malformed JSON). Aborting rather than shipping a pack with "
+            "generic-fallback jargon descriptions. Re-run the build; if it persists, "
+            "check the naming provider's status."
+        )
 
     log("[6/6] Layer E — compiling prompts + assembling pack …")
     pack = PersonaPack(

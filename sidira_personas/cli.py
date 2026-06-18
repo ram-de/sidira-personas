@@ -27,7 +27,12 @@ def cli() -> None:
 @click.option("--limit", default=None, type=int, help="Optional row cap for fast iteration.")
 @click.option("--no-llm", is_flag=True, default=False,
               help="Skip LLM naming entirely; use generic Persona01/02… fallback for every persona.")
-def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None:
+@click.option("--require-llm", is_flag=True, default=False,
+              help="Production posture: fail the build if any persona would ship with a "
+                   "generic-fallback (jargon) description instead of an LLM name. Use for "
+                   "real-customer packs. Mutually exclusive with --no-llm.")
+def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool,
+        require_llm: bool) -> None:
     cfg = yaml.safe_load(Path(config_path).read_text())
     run_id = f"{cfg.get('run_id_prefix', 'run')}-{dt.datetime.utcnow().strftime('%Y%m%dT%H%M%S')}"
     out = Path(out_dir) / run_id
@@ -43,7 +48,8 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool) -> None
         df = df.head(limit)
     click.echo(f"      {len(df):,} rows, {df.shape[1]} columns")
 
-    result = run_pipeline(df, cfg, run_id=run_id, no_llm=no_llm, log=click.echo)
+    result = run_pipeline(df, cfg, run_id=run_id, no_llm=no_llm,
+                          require_llm=require_llm, log=click.echo)
 
     result.pack.to_json(str(out / "persona_pack.json"))
     for pid, prompt in result.prompts.items():
