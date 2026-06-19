@@ -35,11 +35,46 @@ from .cluster import assign, fit_gmm_bic
 from .compile_prompts import compile_prompt, generic_fallback_name, llm_name, llm_provider_in_use
 from .encoder import encode_all
 from .sampling import cluster_centroid_and_scale, population_bounds, sample_synthetic_rows
-from .schema import PERSONA_PACK_SCHEMA_VERSION, FeatureDelta, Persona, PersonaPack, PersonaWeights
+from .schema import (
+    PERSONA_PACK_SCHEMA_VERSION,
+    BehavioralSeeds,
+    FeatureDelta,
+    Persona,
+    PersonaPack,
+    PersonaWeights,
+)
 
 
 def _noop(_: str) -> None:  # default log sink
     return None
+
+
+def _unpack_named(named: tuple) -> tuple[str, str, str, BehavioralSeeds | None]:
+    """Normalize an ``llm_name`` / ``generic_fallback_name`` result into
+    ``(name, description, jtbd, behavioral_seeds)``.
+
+    ``llm_name`` returns a 4-tuple whose last element is a behavioral-seeds dict
+    (or None); ``generic_fallback_name`` and legacy/stubbed naming paths return a
+    3-tuple (no seeds). Accept both so the no-LLM / fallback path and existing
+    test doubles keep working — a 3-tuple yields ``behavioral_seeds=None`` (the
+    simulator falls back to its default pool, issue #342). A dict seeds value is
+    wrapped into a :class:`BehavioralSeeds`; ``None`` passes through.
+    """
+    name, desc, jtbd = named[0], named[1], named[2]
+    seeds_raw = named[3] if len(named) > 3 else None
+    if isinstance(seeds_raw, BehavioralSeeds):
+        seeds = seeds_raw
+    elif isinstance(seeds_raw, dict):
+        seeds = BehavioralSeeds(
+            age_bands=list(seeds_raw.get("age_bands", [])),
+            locale_bands=list(seeds_raw.get("locale_bands", [])),
+            tenure_bands=list(seeds_raw.get("tenure_bands", [])),
+            current_state_pool=list(seeds_raw.get("current_state_pool", [])),
+            recent_gripe_pool=list(seeds_raw.get("recent_gripe_pool", [])),
+        )
+    else:
+        seeds = None
+    return name, desc, jtbd, seeds
 
 
 @dataclass
@@ -223,7 +258,7 @@ def run_pipeline(
             if require_llm:
                 naming_failures.append(pid)
             named = generic_fallback_name(pid, feats)
-        name, desc, jtbd = named
+        name, desc, jtbd, behavioral_seeds = _unpack_named(named)
 
         # v1.1: full centroid + within-cluster scale + joint synthetic rows (adapted-feature space),
         # plus the mean soft posterior over this cluster's members (component idx j → P{j+1:02d}).
@@ -250,6 +285,7 @@ def run_pipeline(
             feature_scale=feature_scale,
             sample_rows=sample_rows,
             posterior_mean=posterior_mean,
+            behavioral_seeds=behavioral_seeds,
             stability_verdict=jaccard_verdict(jac),
             posterior_entropy=posterior_entropy(posterior_mean),
         )
@@ -310,7 +346,7 @@ def run_pipeline(
                     f"Pre-defined segment from prefilter column {pre['column']} = {fixed_val}. NOT discovered via clustering.",
                     "(not generated — LLM unavailable)",
                 )
-            f_name, f_desc, f_jtbd = fixed_named
+            f_name, f_desc, f_jtbd, f_behavioral_seeds = _unpack_named(fixed_named)
             f_centroid_full, f_feature_scale = cluster_centroid_and_scale(
                 adapted_excluded, fixed_labels, cid)
             f_sample_rows = sample_synthetic_rows(
@@ -331,6 +367,7 @@ def run_pipeline(
                 feature_scale=f_feature_scale,
                 sample_rows=f_sample_rows,
                 posterior_mean=None,  # hard-defined segment, no GMM posterior
+                behavioral_seeds=f_behavioral_seeds,
                 stability_verdict="n/a (hard-defined)",
                 posterior_entropy=None,
             ))

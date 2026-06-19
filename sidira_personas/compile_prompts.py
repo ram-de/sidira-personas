@@ -29,6 +29,11 @@ def generic_fallback_name(persona_id: str, top_features: list[dict]) -> tuple[st
 
     Names are numeric (Persona01, Persona02 …). Description lists the top 3
     distinctive features so the LLM downstream can still reason from the deltas.
+
+    Returns only ``(name, description, jtbd)`` — NOT behavioral_seeds: the
+    fallback path emits no per-persona identity pools, so the simulator degrades
+    to its generic default pool (issue #342). Callers pair this with
+    ``behavioral_seeds=None``.
     """
     name = f"Persona{persona_id.lstrip('P').zfill(2)}" if persona_id.startswith("P") else persona_id
     if top_features:
@@ -169,12 +174,63 @@ def _build_naming_prompt(company_id: str, persona_values: dict, top_features: li
         f"jargon. This audience framing is what downstream behavioral "
         f"simulation reads to recover who-responds-more heterogeneity)\n"
         f"- jtbd (1 sentence, written as a 'job to be done' from the "
-        f"persona's first-person motivation perspective)\n\n"
+        f"persona's first-person motivation perspective)\n"
+        f"- behavioral_seeds (a JSON object grounding per-individual identity "
+        f"variation for THIS segment, so simulated agents drawn from it differ "
+        f"realistically. Infer plausible ranges from the features above — do NOT "
+        f"invent demographics the features contradict. Stay company-agnostic: "
+        f"describe states/gripes in the product's own terms, not a specific "
+        f"brand's. Each list is ordered MOST-COMMON-FIRST (a uniform draw should "
+        f"yield a realistic-ish distribution). Keys:\n"
+        f"    - age_bands (2–4 strings, e.g. \"25-34\"; narrow only as far as the "
+        f"features justify)\n"
+        f"    - locale_bands (2–5 strings, e.g. \"urban_us\", \"suburban_us\")\n"
+        f"    - tenure_bands (1–4 strings describing how long they've used the "
+        f"product, e.g. \"new (<3mo)\", \"established (1-3y)\")\n"
+        f"    - current_state_pool (5–8 short phrases: the situation/mindset this "
+        f"person is in when they engage)\n"
+        f"    - recent_gripe_pool (4–6 short phrases: friction or complaints this "
+        f"segment would plausibly have)\n"
+        f"  )\n\n"
         f"Output JSON only — no prose, no code fences."
     )
 
 
-def _parse_naming_json(text: str) -> tuple[str, str, str]:
+_SEED_LIST_KEYS = (
+    "age_bands",
+    "locale_bands",
+    "tenure_bands",
+    "current_state_pool",
+    "recent_gripe_pool",
+)
+
+
+def _coerce_behavioral_seeds(raw: object) -> dict[str, list[str]] | None:
+    """Normalize the LLM's ``behavioral_seeds`` object into the 5-list shape, or
+    return ``None`` if it's absent / malformed.
+
+    Defensive by design: a missing or garbage ``behavioral_seeds`` key must NOT
+    fail the whole naming call (name/description/jtbd are the load-bearing
+    outputs). A ``None`` here means the persona ships without seeds and the
+    simulator falls back to its default pool (issue #342). Each list is filtered
+    to non-empty strings; an all-empty result collapses to ``None`` so we never
+    emit a hollow ``{age_bands: [], ...}`` that masks the fallback.
+    """
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, list[str]] = {}
+    for key in _SEED_LIST_KEYS:
+        vals = raw.get(key)
+        if isinstance(vals, list):
+            out[key] = [s.strip() for s in vals if isinstance(s, str) and s.strip()]
+        else:
+            out[key] = []
+    if not any(out[k] for k in _SEED_LIST_KEYS):
+        return None
+    return out
+
+
+def _parse_naming_json(text: str) -> tuple[str, str, str, dict[str, list[str]] | None]:
     import json as _json
     text = text.strip()
     if text.startswith("```"):
@@ -183,10 +239,11 @@ def _parse_naming_json(text: str) -> tuple[str, str, str]:
             text = text[4:]
         text = text.strip()
     obj = _json.loads(text)
-    return obj["name"], obj["description"], obj["jtbd"]
+    seeds = _coerce_behavioral_seeds(obj.get("behavioral_seeds"))
+    return obj["name"], obj["description"], obj["jtbd"], seeds
 
 
-def _llm_name_groq(prompt: str) -> tuple[str, str, str] | None:
+def _llm_name_groq(prompt: str) -> tuple[str, str, str, dict[str, list[str]] | None] | None:
     key = os.environ.get("GROQ_API_KEY")
     if not key:
         return None
@@ -205,7 +262,7 @@ def _llm_name_groq(prompt: str) -> tuple[str, str, str] | None:
         return None
 
 
-def _llm_name_anthropic(prompt: str) -> tuple[str, str, str] | None:
+def _llm_name_anthropic(prompt: str) -> tuple[str, str, str, dict[str, list[str]] | None] | None:
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         return None
@@ -246,8 +303,15 @@ def llm_name(
     persona_values: dict,
     top_features: list[dict],
     provider: str | None = None,
-) -> tuple[str, str, str] | None:
+) -> tuple[str, str, str, dict[str, list[str]] | None] | None:
     """Ask an LLM to name + describe a persona from its z-deltas vs. baseline.
+
+    Returns ``(name, description, jtbd, behavioral_seeds)`` on success, where
+    ``behavioral_seeds`` is a 5-list dict (age/locale/tenure bands +
+    current-state / recent-gripe pools) the simulator's identity_seed service
+    draws from — or ``None`` for that element if the model omitted it. The same
+    single LLM round-trip produces all four (issue #342). For back-compat, a
+    legacy 3-tuple from a stubbed/older path is tolerated by callers.
 
     ``provider`` forces a specific backend (``"groq"`` / ``"anthropic"``); when
     ``None`` the preference is first-available-wins (Groq → Anthropic). A forced

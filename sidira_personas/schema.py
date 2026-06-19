@@ -40,6 +40,28 @@ class PersonaWeights:
 
 
 @dataclass
+class BehavioralSeeds:
+    """Per-persona identity-draw pools consumed by the simulator's identity_seed
+    service (``draw_identity_seed``). Each list is ordered most-common-first so a
+    uniform draw yields a realistic-ish distribution for THIS segment.
+
+    LLM-generated alongside the persona name/description (see compile_prompts),
+    grounded in the cluster's distinctive z-deltas + feature values. When the LLM
+    is unavailable (``--no-llm`` / no key), the producer emits ``None`` and the
+    simulator falls back to its generic ``_DEFAULT_BEHAVIORAL_SEEDS`` pool — same
+    degraded-but-functional behavior as a v1.0 pack that omits the field.
+
+    Mirrors the consumer's ``BehavioralSeedSchema`` field-for-field (5 lists).
+    """
+
+    age_bands: list[str] = field(default_factory=list)
+    locale_bands: list[str] = field(default_factory=list)
+    tenure_bands: list[str] = field(default_factory=list)
+    current_state_pool: list[str] = field(default_factory=list)
+    recent_gripe_pool: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Persona:
     id: str
     name: str
@@ -55,6 +77,10 @@ class Persona:
     feature_scale: dict[str, float] = field(default_factory=dict)
     sample_rows: list[dict[str, float]] = field(default_factory=list)
     posterior_mean: dict[str, float] | None = None
+    # --- #342 (additive) — per-persona identity-draw pools for the simulator's
+    # identity_seed service. None when LLM naming is off/unavailable (the consumer
+    # then falls back to its generic default pool, exactly as a v1.0 pack does). ---
+    behavioral_seeds: BehavioralSeeds | None = None
     # --- #7 honesty fields (additive) ---
     # ``stability`` now carries the per-cluster Jaccard (Hennig clusterboot) for discovered
     # personas, and ``None`` for FIXED_* hard-defined segments (no GMM bootstrap applies — the
