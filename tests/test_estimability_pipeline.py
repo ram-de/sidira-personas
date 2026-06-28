@@ -69,6 +69,15 @@ def test_off_when_enabled_false(df, cfg):
     assert res.estimability_manifest is None
 
 
+def test_off_when_enabled_is_truthy_non_bool_string(df, cfg):
+    # Strict off-by-default: a quoted/truthy non-bool value (e.g. `enabled: "false"`) must NOT
+    # silently enable the manifest — only an actual boolean True does.
+    base = copy.deepcopy(cfg)
+    base.setdefault("estimability", {})["enabled"] = "false"   # truthy string, not bool True
+    res = run_pipeline(df, base, run_id="t-strict", no_llm=True)
+    assert res.estimability_manifest is None
+
+
 # --------------------------------------------------------------------------- #
 # 2. enabled → well-formed manifest, pack unchanged
 # --------------------------------------------------------------------------- #

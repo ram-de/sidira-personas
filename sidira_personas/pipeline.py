@@ -469,7 +469,9 @@ def run_pipeline(
     # the config opts in; wrapped so it can NEVER fail or slow the pack build (the money path).
     estimability_manifest = None
     est_cfg = cfg.get("estimability") or {}
-    if est_cfg.get("enabled"):
+    # Strict: only an actual boolean True enables it, so a quoted/truthy non-bool config value
+    # (e.g. `enabled: "false"`) does NOT silently turn the manifest on.
+    if est_cfg.get("enabled") is True:
         try:
             from .estimability import build_manifest_from_frame
             src = cfg["source"]
@@ -486,6 +488,7 @@ def run_pipeline(
                 max_treatments=int(est_cfg.get("max_treatments", 8)),
                 max_outcomes=int(est_cfg.get("max_outcomes", 8)),
                 neg_control_map=est_cfg.get("neg_control_map") or None,
+                max_rows=int(est_cfg.get("max_rows", 50_000)),
             )
             estimability_manifest = asdict(m)
             log(f"[estimability] {len(m.candidate_effects)} candidate effect(s), "

@@ -87,6 +87,20 @@ def support_check(df, treatment, outcome, covariates, min_arm=200, min_overlap=0
     df = df.dropna(subset=[treatment, outcome, *covariates])
     reasons: list[str] = []
     T = df[treatment].to_numpy()
+    # Defensive support gate: a non-numeric outcome/covariate (e.g. an object/datetime column a
+    # generic caller mislabeled and that slipped past the manifest's dtype allowlist) cannot be
+    # coerced to float and would crash the estimator's `to_numpy(float)`. Mark it unsupportable
+    # here rather than crashing estimate(). On valid numeric data the conversions succeed and no
+    # reason is added, so behaviour is byte-identical.
+    try:
+        df[outcome].to_numpy(float)
+        if covariates:
+            df[covariates].to_numpy(float)
+    except (ValueError, TypeError):
+        reasons.append("non-numeric outcome or covariate (not empirically estimable)")
+        return Support(supportable=False, reasons=reasons,
+                       n_treat=int((T == 1).sum()), n_control=int((T == 0).sum()),
+                       overlap_fraction=float("nan"))
     Y = df[outcome].to_numpy(float)
     n_t, n_c = int((T == 1).sum()), int((T == 0).sum())
     # The estimator assumes a 0/1 treatment throughout (T==1 vs T==0). A multi-arm or

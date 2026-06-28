@@ -390,3 +390,72 @@ def test_build_manifest_from_frame_grid_cap_records_truncation():
     assert m.truncated.get("treatments_dropped") == 2          # 10 -> kept 8
     # the kept grid still built (8 treatments x 1 outcome), nothing crashed
     assert all(ce.outcome == "retention" for ce in m.candidate_effects)
+
+
+# --------------------------------------------------------------------------- #
+# Fix 1: bounded precompute — a frame larger than max_rows is sampled before the fit
+# --------------------------------------------------------------------------- #
+def test_build_manifest_from_frame_caps_rows_for_bounded_build():
+    # A frame much larger than max_rows: the effect grid must be fit on a deterministic
+    # sample of at most max_rows rows (bounded precompute), so a supportable effect's arm
+    # counts sum to <= max_rows even though the frame is far larger.
+    store = _confounded_store(seed=51, n=3000)
+    m = build_manifest_from_frame(store, "acme", "default", "v_1", "fixture://cap-rows",
+                                  max_rows=800)
+    by_outcome = {ce.outcome: ce for ce in m.candidate_effects}
+    ce = by_outcome["retention"]
+    assert ce.supportable is True
+    # the fit used at most max_rows rows, not the full 3000
+    assert ce.n_treat + ce.n_control <= 800
+    assert any(c.role == "treatment_candidate" for c in m.columns)   # well-formed catalog
+
+
+# --------------------------------------------------------------------------- #
+# Fix 2: outcome/covariate selection is robust to ANY non-numeric dtype label
+# --------------------------------------------------------------------------- #
+def test_build_manifest_excludes_non_numeric_outcome_dtype():
+    # A generic caller hints an outcome whose dtype label is "datetime" (not "string"/"text").
+    # The allowlist must EXCLUDE it from the grid so a real datetime column never reaches the
+    # estimator's to_numpy(float) — the numeric outcome still builds, the datetime one doesn't.
+    from sidira_personas.estimability.manifest_builder import build_manifest
+
+    rng = np.random.default_rng(61)
+    n = 2000
+    frame = pd.DataFrame({
+        "deal_flag": (rng.random(n) < 0.5).astype(int),
+        "conf": rng.standard_normal(n),
+        "retention": (rng.random(n) < 0.5).astype(float),                  # numeric outcome
+        # hint-named outcome ("signup") but a real datetime column -> NOT numeric
+        "signup_date": pd.to_datetime("2020-01-01")
+        + pd.to_timedelta(rng.integers(0, 365, n), unit="D"),
+    })
+    column_profiles = [
+        {"name": "deal_flag", "dtype": "number", "distinct_count": 2, "null_fraction": 0.0},
+        {"name": "conf", "dtype": "number", "distinct_count": n, "null_fraction": 0.0},
+        {"name": "retention", "dtype": "number", "distinct_count": 2, "null_fraction": 0.0},
+        {"name": "signup_date", "dtype": "datetime", "distinct_count": 365, "null_fraction": 0.0},
+    ]
+    m = build_manifest("acme", "default", "v_1", "fixture://dt",
+                       column_profiles, capabilities=[],
+                       load_frame=lambda cols: frame[cols],
+                       binary_treatment_cols={"deal_flag"})
+    # the numeric outcome built; the datetime outcome was simply excluded (no crash)
+    assert any(ce.outcome == "retention" for ce in m.candidate_effects)
+    assert all(ce.outcome != "signup_date" for ce in m.candidate_effects)
+
+
+def test_support_check_rejects_non_numeric_outcome():
+    # Defensive backstop: a non-numeric outcome that slips directly into support_check (no
+    # to_numpy(float) coercion possible) is marked unsupportable rather than crashing estimate().
+    from sidira_personas.estimability import support_check
+
+    rng = np.random.default_rng(63)
+    n = 600
+    df = pd.DataFrame({
+        "T": (rng.random(n) < 0.5).astype(int),
+        "X": rng.standard_normal(n),
+        "Y": rng.choice(["a", "b", "c"], size=n),     # object/string outcome -> not float-coercible
+    })
+    sup = support_check(df, "T", "Y", ["X"], min_arm=10)
+    assert sup.supportable is False
+    assert "non-numeric outcome or covariate (not empirically estimable)" in sup.reasons

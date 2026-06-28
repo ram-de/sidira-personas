@@ -181,11 +181,14 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
         treatments = [t for t in treatments if t in binary_treatment_cols]
 
     # Outcomes must be numeric for the empirical estimator (it does Y.to_numpy(float)). A
-    # hint-named but non-numeric column (e.g. a `signup_date` string matched by the "signup"
-    # hint) is NOT empirically estimable and must never enter the grid — route it to the LLM.
-    # Mirrors the covariate dtype filter below.
+    # hint-named but non-numeric column (e.g. a `signup_date` matched by the "signup" hint) is
+    # NOT empirically estimable and must never enter the grid — route it to the LLM. Use an
+    # ALLOWLIST of numeric dtype labels (the `_dtype_of` vocabulary emits "number"/"bool"/
+    # "string"), so any non-numeric label a generic caller supplies ("object", "date",
+    # "datetime", "category", "unknown", ...) is excluded, not just "string"/"text". Mirrors
+    # the covariate dtype filter below.
     outcomes = sorted(c.name for c in cols if c.role == "outcome_candidate" and c.has_variation
-                      and c.dtype not in ("string", "text"))
+                      and c.dtype in ("number", "bool"))
 
     # Cap the grid — keep the first N (sorted), record the overflow. NEVER silently drop.
     truncated: dict = {}
@@ -202,8 +205,11 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
         if c.name in treat_set:
             c.role = "treatment_candidate"
 
+    # Covariates feed the propensity/standardization fitters (X.to_numpy(float)), so they too
+    # must be numeric — ALLOWLIST numeric dtype labels (see the outcome filter above) rather
+    # than denylisting only "string"/"text", which would leak "object"/"datetime"/"category".
     covars = [c.name for c in cols if c.role == "covariate" and c.has_variation
-              and c.dtype not in ("string", "text")]
+              and c.dtype in ("number", "bool")]
 
     nc_map = neg_control_map or {}
     effects: list[CandidateEffect] = []
@@ -281,7 +287,8 @@ def _is_binary_01(s: pd.Series) -> bool:
 def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
                               pack_version: str, feature_store: str,
                               max_treatments: int = 8, max_outcomes: int = 8,
-                              neg_control_map: dict[str, list[str]] | None = None) -> Manifest:
+                              neg_control_map: dict[str, list[str]] | None = None,
+                              max_rows: int = 50_000) -> Manifest:
     """Frame-only convenience: derive column profiles from `df` itself and build the manifest.
 
     No crawler Capabilities are available in this repo, so treatment candidates are discovered
@@ -291,7 +298,18 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
     levers (a 2-level {30,40} or a 3-level {0,1,2} column is NOT a 0/1 treatment and is out of
     scope for the empirical route). `neg_control_map` (outcome -> [vouched NC columns]) is
     passed through unchanged.
+
+    BOUNDED PRECOMPUTE: this build is synchronous before the pack returns, so its cost is
+    capped. When `len(df) > max_rows` the effect grid is fit on a deterministic random sample
+    of `max_rows` rows (`df.sample(n=max_rows, random_state=0)`) taken BEFORE profiling/
+    load_frame, so BOTH the column profiles AND every `load_frame` slice come from the same
+    sample. Enabling the manifest therefore adds only bounded build time (<= max_rows rows x
+    the capped `max_treatments` x `max_outcomes` grid), never unbounded. The column catalog's
+    `null_fraction`/`distinct_count` are computed on the sample, which is fine.
     """
+    # Cap the estimability sample (the pack/clustering upstream already used the full df).
+    if len(df) > max_rows:
+        df = df.sample(n=max_rows, random_state=0)
     column_profiles = [{
         "name": c,
         "dtype": _dtype_of(df[c]),
