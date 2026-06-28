@@ -131,22 +131,29 @@ def _link(capabilities: list[dict], cols: list[ColumnEntry]) -> list[CapabilityL
 
 
 def _lowcard_treatments(cols: list[ColumnEntry]) -> list[str]:
-    """Capability-free lever discovery: non-outcome, varying, low-cardinality (2..10) columns.
+    """Capability-free lever discovery: non-outcome, varying, BINARY (distinct==2) columns.
 
     Used when no crawler Capabilities are available (e.g. a frame-only build), where the
     token-overlap linkage yields nothing. The router still needs candidate levers, so we
-    fall back to data shape: a small-cardinality non-metric column IS a plausible treatment.
+    fall back to data shape: a binary non-metric column IS a plausible treatment.
+
+    Cardinality is restricted to exactly 2 because the empirical estimator assumes a 0/1
+    treatment (T==1 vs T==0). The {0,1}-VALUE check needs the frame and is applied via
+    `binary_treatment_cols` in `build_manifest`; this prunes by cardinality alone. Multi-level
+    / non-binary levers are out of scope for the empirical route (they go to the LLM) — a
+    validated scope boundary, not a TODO.
     """
     return sorted({c.name for c in cols
                    if c.role != "outcome_candidate" and c.has_variation
-                   and c.distinct_count is not None and 2 <= c.distinct_count <= 10})
+                   and c.distinct_count == 2})
 
 
 def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_store: str,
                    column_profiles: list[dict], capabilities: list[dict],
                    load_frame: Callable[[list[str]], pd.DataFrame],
                    max_treatments: int = 8, max_outcomes: int = 8,
-                   neg_control_map: dict[str, list[str]] | None = None) -> Manifest:
+                   neg_control_map: dict[str, list[str]] | None = None,
+                   binary_treatment_cols: set[str] | None = None) -> Manifest:
     """Join columns x capabilities and PRE-FIT the candidate (T->Y) effect grid.
 
     Each SUPPORTABLE effect carries a negative-control verdict ONLY when the caller/LLM has
@@ -156,6 +163,13 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
     "unverified"` so the router routes it to the LLM. The grid is capped at
     `max_treatments` x `max_outcomes` and any excess is recorded on `Manifest.truncated`
     rather than silently dropped.
+
+    The empirical estimator assumes a 0/1 treatment, so a discovered lever must also carry
+    values exactly {0,1}. Column profiles alone can't confirm that, so `binary_treatment_cols`
+    (when supplied — e.g. by `build_manifest_from_frame`, which has the frame) restricts
+    treatment promotion to those verified-binary columns. Non-binary levers are out of scope
+    for the empirical route and fall through to the LLM; `support_check` also rejects any that
+    slip past here, so the non-frame path stays protected (defense in depth).
     """
     cols = _classify(column_profiles)
     links = _link(capabilities, cols)
@@ -163,6 +177,8 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
         treatments = sorted({lk.treatment_column for lk in links if lk.treatment_column})
     else:
         treatments = _lowcard_treatments(cols)
+    if binary_treatment_cols is not None:
+        treatments = [t for t in treatments if t in binary_treatment_cols]
 
     outcomes = sorted(c.name for c in cols if c.role == "outcome_candidate" and c.has_variation)
 
@@ -238,9 +254,12 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
     """Frame-only convenience: derive column profiles from `df` itself and build the manifest.
 
     No crawler Capabilities are available in this repo, so treatment candidates are discovered
-    from data shape (low-cardinality non-outcome columns); see `_lowcard_treatments`. The whole
-    frame is in memory, so `load_frame` is a trivial column selector. `neg_control_map`
-    (outcome -> [vouched NC columns]) is passed through unchanged.
+    from data shape (binary non-outcome columns); see `_lowcard_treatments`. The whole frame is
+    in memory, so `load_frame` is a trivial column selector and we can confirm the {0,1}-VALUE
+    constraint directly: only columns whose non-null values are exactly {0,1} are eligible
+    levers (a 2-level {30,40} or a 3-level {0,1,2} column is NOT a 0/1 treatment and is out of
+    scope for the empirical route). `neg_control_map` (outcome -> [vouched NC columns]) is
+    passed through unchanged.
     """
     column_profiles = [{
         "name": c,
@@ -248,8 +267,11 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
         "distinct_count": int(df[c].nunique()),
         "null_fraction": float(df[c].isna().mean()),
     } for c in df.columns]
+    binary_treatment_cols = {c for c in df.columns
+                             if set(pd.unique(df[c].dropna())) == {0, 1}}
     return build_manifest(customer_id, setup_id, pack_version, feature_store,
                           column_profiles, capabilities=[],
                           load_frame=lambda cols: df[cols],
                           max_treatments=max_treatments, max_outcomes=max_outcomes,
-                          neg_control_map=neg_control_map)
+                          neg_control_map=neg_control_map,
+                          binary_treatment_cols=binary_treatment_cols)

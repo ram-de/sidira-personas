@@ -62,6 +62,19 @@ def _propensity(Xm: np.ndarray, T: np.ndarray) -> np.ndarray:
     return LogisticRegression(max_iter=3000).fit(Xm, T).predict_proba(Xm)[:, 1]
 
 
+def _arm_proba(X_arm: np.ndarray, y_arm: np.ndarray, Xm_full: np.ndarray) -> np.ndarray:
+    """Per-arm outcome probability for the binary T-learner, robust to a constant arm.
+
+    `LogisticRegression.fit` needs both outcome classes present; if an arm's outcome is
+    constant (only 0s or only 1s — which happens for a degenerate negative control the guard
+    estimates WITHOUT going through support_check) the model is undefined. In that case the
+    arm's predicted probability is exactly that constant for every row (a constant predictor),
+    so the T-learner stays well-defined and never crashes."""
+    if len(np.unique(y_arm)) < 2:
+        return np.full(Xm_full.shape[0], float(y_arm[0]))
+    return LogisticRegression(max_iter=3000).fit(X_arm, y_arm).predict_proba(Xm_full)[:, 1]
+
+
 def support_check(df, treatment, outcome, covariates, min_arm=200, min_overlap=0.1) -> Support:
     """Pure data/stats gate: is this hypothesis empirically estimable from the data?"""
     # Drop rows with NaN in any needed column up front, so arm counts and the fitters
@@ -71,6 +84,12 @@ def support_check(df, treatment, outcome, covariates, min_arm=200, min_overlap=0
     T = df[treatment].to_numpy()
     Y = df[outcome].to_numpy(float)
     n_t, n_c = int((T == 1).sum()), int((T == 0).sum())
+    # The estimator assumes a 0/1 treatment throughout (T==1 vs T==0). A multi-arm or
+    # categorical lever (e.g. {30,40} or {0,1,2}) is OUT OF SCOPE for the empirical route and
+    # must go to the LLM — flag it here so the non-frame build path / direct callers are
+    # protected even when manifest discovery hasn't filtered it (a validated scope boundary).
+    if set(pd.unique(df[treatment].dropna())) - {0, 1}:
+        reasons.append("treatment not binary 0/1 (multi-arm/categorical out of scope)")
     if n_t < min_arm or n_c < min_arm:
         reasons.append(f"thin arm(s): treat={n_t}, control={n_c} (< {min_arm})")
     if df[outcome].nunique() < 2:
@@ -111,9 +130,9 @@ def estimate(df, treatment, outcome, covariates) -> Estimate:
 
     # T-learner standardization: per-arm outcome model, predict both on the full sample.
     if binary:
-        m1 = LogisticRegression(max_iter=3000).fit(Xm[T == 1], Y[T == 1])
-        m0 = LogisticRegression(max_iter=3000).fit(Xm[T == 0], Y[T == 0])
-        tl = (m1.predict_proba(Xm)[:, 1] - m0.predict_proba(Xm)[:, 1]).mean()
+        p1 = _arm_proba(Xm[T == 1], Y[T == 1], Xm)   # robust to a constant arm
+        p0 = _arm_proba(Xm[T == 0], Y[T == 0], Xm)
+        tl = (p1 - p0).mean()
     else:
         from sklearn.linear_model import LinearRegression
         m1 = LinearRegression().fit(Xm[T == 1], Y[T == 1])

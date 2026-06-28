@@ -201,6 +201,80 @@ def test_support_check_rejects_per_arm_constant_binary_outcome():
     assert "outcome constant within an arm (cannot fit per-arm model)" in sup.reasons
 
 
+def test_estimate_binary_outcome_constant_within_arm_is_finite():
+    # The control arm's outcome is a constant 0 (degenerate per-arm fit). estimate() must not
+    # crash — the constant arm becomes a constant predictor, keeping the T-learner well-defined.
+    rng = np.random.default_rng(17)
+    n = 2000
+    x = rng.standard_normal(n)
+    t = (rng.random(n) < 0.5).astype(int)
+    y = np.where(t == 1, (rng.random(n) < 0.5).astype(float), 0.0)  # control arm: all 0
+    df = pd.DataFrame({"T": t, "Y": y, "X": x})
+
+    est = estimate(df, "T", "Y", ["X"])
+    assert np.isfinite(est.t_learner_ate)
+    assert np.isfinite(est.naive_ate)
+    assert np.isfinite(est.ipw_ate)
+
+
+def test_guard_does_not_crash_on_per_arm_constant_neg_control():
+    from sidira_personas.estimability import GuardedEstimate
+
+    # A mapped negative control that is constant within an arm reaches estimate() WITHOUT
+    # support_check; the guard must still return a GuardedEstimate, not crash.
+    rng = np.random.default_rng(19)
+    n = 2000
+    x = rng.standard_normal(n)
+    t = (rng.random(n) < 0.5).astype(int)
+    y = (rng.random(n) < _sig(0.5 * t + 0.3 * x)).astype(float)        # well-behaved outcome
+    nc = np.where(t == 1, (rng.random(n) < 0.5).astype(float), 0.0)    # constant 0 in control arm
+    df = pd.DataFrame({"T": t, "Y": y, "X": x, "NC": nc})
+
+    g = negative_control_guard(df, "T", "Y", ["NC"], ["X"])
+    assert isinstance(g, GuardedEstimate)
+    assert np.isfinite(g.neg_control_effect)
+    assert g.confidence in ("high", "low/abstain")
+
+
+def test_support_check_rejects_non_binary_treatment():
+    from sidira_personas.estimability import support_check
+
+    rng = np.random.default_rng(23)
+    n = 1000
+    x = rng.standard_normal(n)
+    y = (rng.random(n) < 0.5).astype(float)
+    reason = "treatment not binary 0/1 (multi-arm/categorical out of scope)"
+
+    # two-level but NOT {0,1}
+    t2 = np.where(rng.random(n) < 0.5, 30, 40)
+    sup2 = support_check(pd.DataFrame({"T": t2, "Y": y, "X": x}), "T", "Y", ["X"], min_arm=10)
+    assert sup2.supportable is False
+    assert reason in sup2.reasons
+
+    # three-level {0,1,2}
+    t3 = rng.integers(0, 3, size=n)
+    sup3 = support_check(pd.DataFrame({"T": t3, "Y": y, "X": x}), "T", "Y", ["X"], min_arm=10)
+    assert sup3.supportable is False
+    assert reason in sup3.reasons
+
+
+def test_build_manifest_from_frame_skips_multilevel_lever():
+    # A 3-level {0,1,2} "lever" is not a 0/1 treatment -> it must NOT be promoted to a
+    # treatment_candidate and must yield no candidate effects (route such levers to the LLM).
+    rng = np.random.default_rng(29)
+    n = 2000
+    store = pd.DataFrame({
+        "lever": rng.integers(0, 3, size=n),                       # 3-level: out of scope
+        "conf": rng.standard_normal(n),                            # continuous covariate
+        "retention": (rng.random(n) < 0.5).astype(float),          # outcome
+    })
+    m = build_manifest_from_frame(store, "acme", "default", "v_1", "fixture://multi")
+
+    roles = {c.name: c.role for c in m.columns}
+    assert roles["lever"] != "treatment_candidate"
+    assert m.candidate_effects == []
+
+
 def test_build_manifest_from_frame_tolerates_nans_in_covariate():
     store = _confounded_store()
     store = store.copy()
