@@ -180,7 +180,12 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
     if binary_treatment_cols is not None:
         treatments = [t for t in treatments if t in binary_treatment_cols]
 
-    outcomes = sorted(c.name for c in cols if c.role == "outcome_candidate" and c.has_variation)
+    # Outcomes must be numeric for the empirical estimator (it does Y.to_numpy(float)). A
+    # hint-named but non-numeric column (e.g. a `signup_date` string matched by the "signup"
+    # hint) is NOT empirically estimable and must never enter the grid — route it to the LLM.
+    # Mirrors the covariate dtype filter below.
+    outcomes = sorted(c.name for c in cols if c.role == "outcome_candidate" and c.has_variation
+                      and c.dtype not in ("string", "text"))
 
     # Cap the grid — keep the first N (sorted), record the overflow. NEVER silently drop.
     truncated: dict = {}
@@ -247,6 +252,32 @@ def _dtype_of(s: pd.Series) -> str:
     return "string"
 
 
+def _safe_nunique(s: pd.Series) -> int | None:
+    """Distinct count that tolerates unhashable cell values.
+
+    JSON/dict/list-valued columns (e.g. the synthetic fixture's `json_counts` /
+    `json_ratios` when materialised as dict or list cells) raise
+    ``TypeError: unhashable type`` inside ``nunique()``. Return ``None`` for those rather
+    than crashing the whole manifest: a ``None`` distinct_count is never promoted to a
+    treatment (``_lowcard_treatments`` requires ``distinct_count == 2``) and such columns
+    are non-numeric, so the dtype filter keeps them out of covariates and outcomes too."""
+    try:
+        return int(s.nunique())
+    except TypeError:
+        return None
+
+
+def _is_binary_01(s: pd.Series) -> bool:
+    """True iff the column's non-null values are exactly ``{0, 1}``.
+
+    Returns ``False`` on ANY exception (e.g. unhashable dict/list cells raising inside
+    ``pd.unique``), so an unhashable column is simply never a treatment candidate."""
+    try:
+        return set(pd.unique(s.dropna())) == {0, 1}
+    except Exception:
+        return False
+
+
 def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
                               pack_version: str, feature_store: str,
                               max_treatments: int = 8, max_outcomes: int = 8,
@@ -264,11 +295,10 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
     column_profiles = [{
         "name": c,
         "dtype": _dtype_of(df[c]),
-        "distinct_count": int(df[c].nunique()),
+        "distinct_count": _safe_nunique(df[c]),
         "null_fraction": float(df[c].isna().mean()),
     } for c in df.columns]
-    binary_treatment_cols = {c for c in df.columns
-                             if set(pd.unique(df[c].dropna())) == {0, 1}}
+    binary_treatment_cols = {c for c in df.columns if _is_binary_01(df[c])}
     return build_manifest(customer_id, setup_id, pack_version, feature_store,
                           column_profiles, capabilities=[],
                           load_frame=lambda cols: df[cols],
