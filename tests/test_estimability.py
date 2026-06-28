@@ -220,8 +220,9 @@ def test_estimate_binary_outcome_constant_within_arm_is_finite():
 def test_guard_does_not_crash_on_per_arm_constant_neg_control():
     from sidira_personas.estimability import GuardedEstimate
 
-    # A mapped negative control that is constant within an arm reaches estimate() WITHOUT
-    # support_check; the guard must still return a GuardedEstimate, not crash.
+    # A mapped negative control that is constant within an arm is not estimable (support_check
+    # rejects "outcome constant within an arm"). The guard must support-check it, skip it, and —
+    # with no other control — conservatively abstain rather than estimate a degenerate control.
     rng = np.random.default_rng(19)
     n = 2000
     x = rng.standard_normal(n)
@@ -232,8 +233,78 @@ def test_guard_does_not_crash_on_per_arm_constant_neg_control():
 
     g = negative_control_guard(df, "T", "Y", ["NC"], ["X"])
     assert isinstance(g, GuardedEstimate)
-    assert np.isfinite(g.neg_control_effect)
-    assert g.confidence in ("high", "low/abstain")
+    assert g.neg_control_effects == {}                       # degenerate control excluded
+    assert g.trips is True
+    assert g.confidence == "low/abstain"
+    assert "no usable negative control" in g.reason
+
+
+def test_guard_does_not_crash_on_neg_control_with_empty_arm_after_dropna():
+    from sidira_personas.estimability import GuardedEstimate
+
+    # The P1 crash case: a mapped NC whose non-null rows fall ENTIRELY in one treatment arm
+    # (the other arm is NaN). After dropna(subset=[T, NC, X]) one arm has ZERO rows, so the
+    # binary per-arm fitter would read an empty y_arm (y_arm[0] -> IndexError). The guard must
+    # support-check the NC, find it thin/empty, skip it, and abstain without crashing.
+    rng = np.random.default_rng(37)
+    n = 4000
+    x = rng.standard_normal(n)
+    t = (rng.random(n) < 0.5).astype(int)
+    y = (rng.random(n) < _sig(0.5 * t + 0.3 * x)).astype(float)
+    nc = np.where(t == 1, (rng.random(n) < 0.5).astype(float), np.nan)  # NaN out the entire control arm
+    df = pd.DataFrame({"T": t, "Y": y, "X": x, "NC": nc})
+
+    g = negative_control_guard(df, "T", "Y", ["NC"], ["X"])
+    assert isinstance(g, GuardedEstimate)
+    assert g.neg_control_effects == {}                       # empty-arm control excluded, not estimated
+    assert g.trips is True
+    assert g.confidence == "low/abstain"
+    assert "no usable negative control" in g.reason
+
+
+def test_guard_abstains_when_all_neg_controls_degenerate():
+    # Every supplied control is degenerate (one constant-in-arm, one NaN'd-out arm) -> no usable
+    # control -> conservative abstain.
+    rng = np.random.default_rng(41)
+    n = 4000
+    x = rng.standard_normal(n)
+    t = (rng.random(n) < 0.5).astype(int)
+    y = (rng.random(n) < _sig(0.5 * t + 0.3 * x)).astype(float)
+    nc_const = np.where(t == 1, (rng.random(n) < 0.5).astype(float), 0.0)     # constant 0 control arm
+    nc_empty = np.where(t == 0, (rng.random(n) < 0.5).astype(float), np.nan)  # NaN out treatment arm
+    df = pd.DataFrame({"T": t, "Y": y, "X": x, "NC_const": nc_const, "NC_empty": nc_empty})
+
+    g = negative_control_guard(df, "T", "Y", ["NC_const", "NC_empty"], ["X"])
+    assert g.neg_control_effects == {}
+    assert g.trips is True
+    assert g.confidence == "low/abstain"
+    assert np.isnan(g.neg_control_effect)
+    assert "no usable negative control" in g.reason
+
+
+def test_guard_uses_only_supportable_neg_control_when_one_is_degenerate():
+    # One usable control + one degenerate control: only the usable one contributes a residual,
+    # and the verdict matches running the guard with JUST the usable control.
+    rng = np.random.default_rng(43)
+    n = 6000
+    u = rng.standard_normal(n)
+    x_obs = rng.standard_normal(n)
+    t = (rng.random(n) < _sig(1.2 * u)).astype(int)
+    y = (rng.random(n) < _sig(0.8 * u + 0.5 * t)).astype(float)
+    nc_good = (rng.random(n) < _sig(0.8 * u)).astype(float)              # supportable, shares confounder
+    nc_bad = np.where(t == 1, (rng.random(n) < 0.5).astype(float), np.nan)  # empty control arm -> skip
+    df = pd.DataFrame({"T": t, "Y": y, "Xobs": x_obs,
+                       "NC_good": nc_good, "NC_bad": nc_bad})
+
+    g_mixed = negative_control_guard(df, "T", "Y", ["NC_good", "NC_bad"], ["Xobs"])
+    g_solo = negative_control_guard(df, "T", "Y", ["NC_good"], ["Xobs"])
+
+    assert set(g_mixed.neg_control_effects) == {"NC_good"}     # degenerate one excluded
+    assert g_mixed.neg_control_effects == g_solo.neg_control_effects
+    assert g_mixed.neg_control_effect == g_solo.neg_control_effect
+    assert g_mixed.trips == g_solo.trips
+    assert g_mixed.confidence == g_solo.confidence
+    assert g_mixed.reason == g_solo.reason
 
 
 def test_support_check_rejects_non_binary_treatment():

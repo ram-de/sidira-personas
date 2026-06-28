@@ -70,6 +70,11 @@ def _arm_proba(X_arm: np.ndarray, y_arm: np.ndarray, Xm_full: np.ndarray) -> np.
     estimates WITHOUT going through support_check) the model is undefined. In that case the
     arm's predicted probability is exactly that constant for every row (a constant predictor),
     so the T-learner stays well-defined and never crashes."""
+    # Defense in depth: an empty arm (zero rows after a null-bearing column is dropped) has no
+    # outcome to read — `y_arm[0]` would IndexError. The negative_control_guard support-checks
+    # each control so this should be unreachable, but never crash: predict a constant 0.
+    if len(y_arm) == 0:
+        return np.zeros(Xm_full.shape[0])
     if len(np.unique(y_arm)) < 2:
         return np.full(Xm_full.shape[0], float(y_arm[0]))
     return LogisticRegression(max_iter=3000).fit(X_arm, y_arm).predict_proba(Xm_full)[:, 1]
@@ -170,7 +175,23 @@ def negative_control_guard(df, treatment, outcome, neg_controls, covariates,
     """
     names = [neg_controls] if isinstance(neg_controls, str) else list(neg_controls)
     est = estimate(df, treatment, outcome, covariates)
-    effects = {nc: float(estimate(df, treatment, nc, covariates).t_learner_ate) for nc in names}
+    # Support-check each control before estimating it. The main outcome Y is gated by the caller,
+    # but the controls are not: a null-bearing control whose non-null rows leave an arm EMPTY
+    # (or constant/non-binary/thin) is not estimable, and estimating it would crash the per-arm
+    # fitter (empty `y_arm` -> `y_arm[0]`). Only supportable controls contribute a residual; the
+    # rest are skipped (this leaves valid-data behaviour identical — every usable control is kept).
+    effects: dict = {}
+    for nc in names:
+        if support_check(df, treatment, nc, covariates).supportable:
+            effects[nc] = float(estimate(df, treatment, nc, covariates).t_learner_ate)
+    # No usable control survived support-checking (every mapped control had a thin/degenerate arm).
+    # We cannot verify the estimate, so conservatively abstain -> route to LLM, rather than trust an
+    # unverifiable effect or estimate a degenerate control.
+    if not effects:
+        return GuardedEstimate(
+            estimate=est, neg_control_effect=float("nan"), neg_control_effects={},
+            floor=floor, trips=True, confidence="low/abstain",
+            reason="no usable negative control (thin/degenerate arms): cannot verify, route to LLM")
     decisive = max(effects.items(), key=lambda kv: abs(kv[1]))     # (name, effect) of max |effect|
     nc_mag = abs(decisive[1])
     main_mag = abs(est.t_learner_ate)
