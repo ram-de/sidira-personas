@@ -87,12 +87,19 @@ class PipelineResult:
     posteriors. ``baseline_crosstab`` is the optional baseline-segment ×
     persona crosstab (``None`` when no ``baseline_segment_column`` is configured
     or the column is absent).
+
+    ``estimability_manifest`` is the optional router-precompute manifest
+    (``dataclasses.asdict`` of :class:`~sidira_personas.estimability.Manifest`), built only
+    when ``cfg["estimability"]["enabled"]`` is true. It is ADDITIVE and best-effort: it can
+    never fail or slow the pack build, so on any error it carries
+    ``{"status": "error", "reason": ...}`` instead of aborting. ``None`` when the knob is off.
     """
 
     pack: PersonaPack
     prompts: dict[str, str]
     assignments: pd.DataFrame
     baseline_crosstab: pd.DataFrame | None = field(default=None)
+    estimability_manifest: dict | None = field(default=None)
 
 
 def run_pipeline(
@@ -458,9 +465,43 @@ def run_pipeline(
             margins=True, margins_name="TOTAL",
         )
 
+    # Estimability manifest (router precompute) — ADDITIVE, OFF by default. Built only when
+    # the config opts in; wrapped so it can NEVER fail or slow the pack build (the money path).
+    estimability_manifest = None
+    est_cfg = cfg.get("estimability") or {}
+    # Strict: only an actual boolean True enables it, so a quoted/truthy non-bool config value
+    # (e.g. `enabled: "false"`) does NOT silently turn the manifest on.
+    if est_cfg.get("enabled") is True:
+        try:
+            from .estimability import build_manifest_from_frame
+            src = cfg["source"]
+            if src.get("type") == "snowflake":
+                feature_store = f"{src.get('database')}.{src.get('schema')}.{src.get('table')}"
+            else:
+                feature_store = str(src.get("path", "local"))
+            m = build_manifest_from_frame(
+                df,
+                customer_id=cfg["company_id"],
+                setup_id=str(cfg.get("setup_id", "default")),
+                pack_version=run_id,           # backend overrides with the authoritative v_N in Phase 3
+                feature_store=feature_store,
+                max_treatments=int(est_cfg.get("max_treatments", 8)),
+                max_outcomes=int(est_cfg.get("max_outcomes", 8)),
+                neg_control_map=est_cfg.get("neg_control_map") or None,
+                max_rows=int(est_cfg.get("max_rows", 50_000)),
+            )
+            estimability_manifest = asdict(m)
+            log(f"[estimability] {len(m.candidate_effects)} candidate effect(s), "
+                f"{len([c for c in m.columns if c.role == 'treatment_candidate'])} lever(s); "
+                f"truncated={m.truncated}")
+        except Exception as e:  # additive artifact: never fail the pack build
+            estimability_manifest = {"status": "error", "reason": f"{type(e).__name__}: {e}"}
+            log(f"[estimability] skipped (error, pack unaffected): {type(e).__name__}: {e}")
+
     return PipelineResult(
         pack=pack,
         prompts=prompts,
         assignments=assignments,
         baseline_crosstab=baseline_crosstab,
+        estimability_manifest=estimability_manifest,
     )

@@ -88,3 +88,14 @@ sampling:
 prompt_compiler:
   top_n_distinctive_features_per_group: 4
   threshold_sigma: 0.3
+
+# Estimability manifest (router precompute) — ADDITIVE and OFF by default. When enabled, the
+# persona build also emits estimability_manifest.json beside persona_pack.json (binary levers ->
+# numeric outcomes pre-fit with the negative-control guard). It is best-effort and wrapped so it
+# can NEVER fail or slow the pack build (the pack is the money path); on any error it records a
+# {"status": "error", ...} stub instead. Opt in per-build by flipping `enabled` to true.
+estimability:
+  enabled: false           # opt-in; default off
+  max_treatments: 8
+  max_outcomes: 8
+  neg_control_map: {}      # optional: outcome_col -> [negative-control cols] (LLM/domain-vouched)

@@ -7,6 +7,7 @@ prompts, parquet, crosstab); all the modelling lives in ``run_pipeline``.
 from __future__ import annotations
 
 import datetime as dt
+import json
 from pathlib import Path
 
 import click
@@ -55,6 +56,13 @@ def run(config_path: str, out_dir: str, limit: int | None, no_llm: bool,
     for pid, prompt in result.prompts.items():
         (out / "prompts" / f"{pid}.md").write_text(prompt)
     result.assignments.to_parquet(out / "assignments.parquet", index=False)
+
+    # Additive, off-by-default router precompute (see config `estimability.enabled`).
+    if result.estimability_manifest is not None:
+        (out / "estimability_manifest.json").write_text(
+            json.dumps(result.estimability_manifest, indent=2, default=str)
+        )
+        click.echo("      estimability manifest written → estimability_manifest.json")
 
     if result.baseline_crosstab is not None:
         click.echo("\nBaseline segment vs. discovered persona — crosstab:")
