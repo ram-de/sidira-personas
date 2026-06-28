@@ -64,13 +64,22 @@ def _propensity(Xm: np.ndarray, T: np.ndarray) -> np.ndarray:
 
 def support_check(df, treatment, outcome, covariates, min_arm=200, min_overlap=0.1) -> Support:
     """Pure data/stats gate: is this hypothesis empirically estimable from the data?"""
+    # Drop rows with NaN in any needed column up front, so arm counts and the fitters
+    # below see only usable rows (a null-bearing column must not crash sklearn).
+    df = df.dropna(subset=[treatment, outcome, *covariates])
     reasons: list[str] = []
     T = df[treatment].to_numpy()
+    Y = df[outcome].to_numpy(float)
     n_t, n_c = int((T == 1).sum()), int((T == 0).sum())
     if n_t < min_arm or n_c < min_arm:
         reasons.append(f"thin arm(s): treat={n_t}, control={n_c} (< {min_arm})")
     if df[outcome].nunique() < 2:
         reasons.append("outcome has no variation")
+    # A binary outcome that is constant WITHIN an arm cannot fit the per-arm model in estimate()
+    # (LogisticRegression needs both classes present in each arm). Mark it unsupportable here.
+    binary = set(np.unique(Y)) <= {0.0, 1.0}
+    if binary and ((np.unique(Y[T == 1]).size < 2) or (np.unique(Y[T == 0]).size < 2)):
+        reasons.append("outcome constant within an arm (cannot fit per-arm model)")
     overlap = float("nan")
     if n_t >= 2 and n_c >= 2 and covariates:
         e = _propensity(_Xmat(df, covariates), T)
@@ -83,11 +92,22 @@ def support_check(df, treatment, outcome, covariates, min_arm=200, min_overlap=0
 
 def estimate(df, treatment, outcome, covariates) -> Estimate:
     """Naive vs causal ATE (treatment - control) with honesty diagnostics. No LLM."""
+    # Drop rows with NaN in any needed column so the fitters never see NaN.
+    df = df.dropna(subset=[treatment, outcome, *covariates])
     T = df[treatment].to_numpy()
     Y = df[outcome].to_numpy(float)
-    Xm = _Xmat(df, covariates)
     binary = set(np.unique(Y)) <= {0.0, 1.0}
     naive = Y[T == 1].mean() - Y[T == 0].mean()
+
+    # With no covariates there is no design matrix; the adjusted estimate degenerates to
+    # the unadjusted diff-in-means (sklearn cannot fit an (n, 0) array).
+    if not covariates:
+        return Estimate(n=len(df), outcome_is_binary=binary, naive_ate=naive,
+                        t_learner_ate=naive, ipw_ate=naive, naive_adjusted_gap=0.0,
+                        overlap_fraction=1.0,
+                        sign_adjusted="positive" if naive > 0 else "negative")
+
+    Xm = _Xmat(df, covariates)
 
     # T-learner standardization: per-arm outcome model, predict both on the full sample.
     if binary:

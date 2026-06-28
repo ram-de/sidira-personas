@@ -16,6 +16,14 @@ Vendored from research/empirical-uplift-spike/manifest_builder.py with Phase-1 e
 negative-control verdicts attached to each supportable effect, a grid cap with explicit
 truncation accounting, and a frame-only convenience entry (`build_manifest_from_frame`).
 
+Negative controls are NOT auto-derived from sibling outcomes: a lever frequently moves
+several metrics together (e.g. retention AND conversion), so a real co-effect would
+false-trip the guard. A valid negative control is a metric the treatment must NOT cause
+yet which shares the confounding — nominating one is a domain/LLM judgment (the LLM-as-
+translator MAP step), supplied via `neg_control_map` (Y column -> [vouched NC columns]).
+This is a VALIDATED limit of the method, not a TODO: absent a caller/LLM-vouched control
+the effect ships as `guard_confidence="unverified"` and the router routes it to the LLM.
+
 No hard dependency on the product. Deps: numpy, pandas, scikit-learn (via causal_estimator).
 """
 from __future__ import annotations
@@ -137,12 +145,17 @@ def _lowcard_treatments(cols: list[ColumnEntry]) -> list[str]:
 def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_store: str,
                    column_profiles: list[dict], capabilities: list[dict],
                    load_frame: Callable[[list[str]], pd.DataFrame],
-                   max_treatments: int = 8, max_outcomes: int = 8) -> Manifest:
+                   max_treatments: int = 8, max_outcomes: int = 8,
+                   neg_control_map: dict[str, list[str]] | None = None) -> Manifest:
     """Join columns x capabilities and PRE-FIT the candidate (T->Y) effect grid.
 
-    Each SUPPORTABLE effect carries a negative-control verdict (using the OTHER outcome
-    candidates as controls); the grid is capped at `max_treatments` x `max_outcomes` and any
-    excess is recorded on `Manifest.truncated` rather than silently dropped.
+    Each SUPPORTABLE effect carries a negative-control verdict ONLY when the caller/LLM has
+    vouched for one via `neg_control_map` (outcome column Y -> [valid NC columns]); sibling
+    outcomes are NOT used as controls automatically (a co-moved metric would false-trip the
+    guard). Absent a vouched control, the effect is computed but left `guard_confidence=
+    "unverified"` so the router routes it to the LLM. The grid is capped at
+    `max_treatments` x `max_outcomes` and any excess is recorded on `Manifest.truncated`
+    rather than silently dropped.
     """
     cols = _classify(column_profiles)
     links = _link(capabilities, cols)
@@ -171,13 +184,16 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
     covars = [c.name for c in cols if c.role == "covariate" and c.has_variation
               and c.dtype not in ("string", "text")]
 
+    nc_map = neg_control_map or {}
     effects: list[CandidateEffect] = []
     for T in treatments:
         X = [c for c in covars if c != T]
         for Y in outcomes:
-            ncs = [o for o in outcomes if o != Y]               # other outcome candidates = controls
-            need = list(dict.fromkeys([T, Y, *X, *ncs]))        # one feature-store query, deduped
+            need = list(dict.fromkeys([T, Y, *X, *nc_map.get(Y, [])]))  # one query, deduped
             df = load_frame(need)                               # the ONE query, at build time
+            # Caller/LLM-vouched negative controls for this outcome (the MAP step); no
+            # sibling-outcome auto-NC — a co-moved sibling would false-trip the guard.
+            ncs = [c for c in nc_map.get(Y, []) if c in df.columns and c != Y and c != T]
             sup = support_check(df, T, Y, X)
             if not sup.supportable:
                 effects.append(CandidateEffect(
@@ -217,12 +233,14 @@ def _dtype_of(s: pd.Series) -> str:
 
 def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
                               pack_version: str, feature_store: str,
-                              max_treatments: int = 8, max_outcomes: int = 8) -> Manifest:
+                              max_treatments: int = 8, max_outcomes: int = 8,
+                              neg_control_map: dict[str, list[str]] | None = None) -> Manifest:
     """Frame-only convenience: derive column profiles from `df` itself and build the manifest.
 
     No crawler Capabilities are available in this repo, so treatment candidates are discovered
     from data shape (low-cardinality non-outcome columns); see `_lowcard_treatments`. The whole
-    frame is in memory, so `load_frame` is a trivial column selector.
+    frame is in memory, so `load_frame` is a trivial column selector. `neg_control_map`
+    (outcome -> [vouched NC columns]) is passed through unchanged.
     """
     column_profiles = [{
         "name": c,
@@ -233,4 +251,5 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
     return build_manifest(customer_id, setup_id, pack_version, feature_store,
                           column_profiles, capabilities=[],
                           load_frame=lambda cols: df[cols],
-                          max_treatments=max_treatments, max_outcomes=max_outcomes)
+                          max_treatments=max_treatments, max_outcomes=max_outcomes,
+                          neg_control_map=neg_control_map)

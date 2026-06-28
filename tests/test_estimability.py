@@ -116,7 +116,7 @@ def _confounded_store(seed: int = 21, n: int = 4000) -> pd.DataFrame:
                          "retention": retention, "conversion": conversion})
 
 
-def test_build_manifest_from_frame_supportable_with_guard():
+def test_build_manifest_from_frame_supportable_without_neg_control_map_is_unverified():
     store = _confounded_store()
     m = build_manifest_from_frame(store, "acme", "default", "v_1", "fixture://syn")
 
@@ -132,12 +132,86 @@ def test_build_manifest_from_frame_supportable_with_guard():
     # true effect of the flag on retention is negative; naive comparison is fooled positive
     assert ce.naive_ate > 0
     assert ce.sign_adjusted == "negative"
-    # the guard verdict is populated (not "unverified") because a sibling outcome exists as control
-    assert ce.neg_controls == ["conversion"]
+    # NO neg_control_map -> sibling outcomes are NOT auto-used as controls; left unverified.
+    assert ce.neg_controls == []
+    assert ce.guard_confidence == "unverified"
+    assert ce.guard_trips is None
+    assert ce.neg_control_effect is None
+
+
+def test_build_manifest_from_frame_with_valid_neg_control_map_runs_guard():
+    # A valid negative control: a metric NOT caused by the treatment but sharing the
+    # confounder `conf`. With hidden confounding (conf is the lever's driver but the guard's
+    # covariate set for this control does not neutralise it), the guard should TRIP.
+    rng = np.random.default_rng(101)
+    n = 4000
+    conf = rng.standard_normal(n)                                  # shared confounder
+    other = rng.standard_normal(n)                                 # observed covariate (not conf)
+    flag = (rng.random(n) < _sig(1.3 * conf)).astype(int)         # binary lever
+    retention = (rng.random(n) < _sig(2.0 * conf - 1.0 * flag)).astype(float)
+    # pre_signup shares `conf` strongly but is NOT caused by the flag -> valid NC; the flag's
+    # apparent effect on it is pure residual confounding (the only covariate is `other`).
+    pre_signup = (rng.random(n) < _sig(1.8 * conf)).astype(float)
+    store = pd.DataFrame({"treatment_flag": flag, "other": other,
+                          "retention": retention, "pre_signup": pre_signup})
+
+    m = build_manifest_from_frame(store, "acme", "default", "v_1", "fixture://nc",
+                                  neg_control_map={"retention": ["pre_signup"]})
+
+    by_outcome = {ce.outcome: ce for ce in m.candidate_effects}
+    ce = by_outcome["retention"]
+    assert ce.supportable is True
+    assert ce.neg_controls == ["pre_signup"]
     assert ce.guard_confidence in ("high", "low/abstain")
     assert ce.guard_trips is not None
     assert ce.neg_control_effect is not None
     assert ce.guard_reason
+    # the NC shares the confounder, so the guard reveals hidden confounding -> TRIP
+    assert ce.guard_trips is True
+    assert ce.guard_confidence == "low/abstain"
+
+
+def test_estimate_no_covariates_degenerates_to_naive():
+    rng = np.random.default_rng(5)
+    n = 1000
+    t = (rng.random(n) < 0.5).astype(int)
+    y = (rng.random(n) < _sig(0.7 * t)).astype(float)
+    df = pd.DataFrame({"T": t, "Y": y})
+
+    est = estimate(df, "T", "Y", [])
+    assert est.t_learner_ate == est.naive_ate
+    assert est.ipw_ate == est.naive_ate
+    assert est.naive_adjusted_gap == 0.0
+    assert est.overlap_fraction == 1.0
+
+
+def test_support_check_rejects_per_arm_constant_binary_outcome():
+    from sidira_personas.estimability import support_check
+
+    rng = np.random.default_rng(9)
+    n = 1000
+    t = (rng.random(n) < 0.5).astype(int)
+    x = rng.standard_normal(n)
+    # binary outcome that varies globally but is constant within the control arm
+    y = np.where(t == 1, (rng.random(n) < 0.5).astype(float), 0.0)
+    df = pd.DataFrame({"T": t, "Y": y, "X": x})
+
+    sup = support_check(df, "T", "Y", ["X"], min_arm=10)
+    assert sup.supportable is False
+    assert "outcome constant within an arm (cannot fit per-arm model)" in sup.reasons
+
+
+def test_build_manifest_from_frame_tolerates_nans_in_covariate():
+    store = _confounded_store()
+    store = store.copy()
+    # punch NaNs into the covariate; the dropna in support_check/estimate must absorb them
+    idx = store.sample(frac=0.1, random_state=3).index
+    store.loc[idx, "conf"] = np.nan
+
+    m = build_manifest_from_frame(store, "acme", "default", "v_1", "fixture://nan")
+    # no exception; the grid built and the retention effect exists in some form
+    by_outcome = {ce.outcome: ce for ce in m.candidate_effects}
+    assert "retention" in by_outcome
 
 
 # --------------------------------------------------------------------------- #
