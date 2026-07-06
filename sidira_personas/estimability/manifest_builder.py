@@ -29,6 +29,7 @@ No hard dependency on the product. Deps: numpy, pandas, scikit-learn (via causal
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
+import math
 import re
 import pandas as pd
 import pandas.api.types as ptypes
@@ -38,6 +39,31 @@ from .causal_estimator import support_check, estimate, negative_control_guard
 OUTCOME_HINTS = ("order", "retention", "retain", "convert", "conversion", "visit", "spend",
                  "revenue", "churn", "engage", "active", "purchase", "signup", "subscribe")
 _TOKEN = re.compile(r"[a-z0-9]+")
+
+# The negative-control guard thresholds the manifest is built with. Kept as named constants (not
+# magic literals at the call site) so the value recorded on each CandidateEffect.guard_floor /
+# guard_ratio is provably the SAME value passed into negative_control_guard — the manifest and the
+# guard can never silently drift. These mirror the guard's own validated defaults (floor=0.05,
+# ratio=1.5; campaign iter1-iter5).
+NC_GUARD_FLOOR = 0.05
+NC_GUARD_RATIO = 1.5
+
+
+def _nan_to_none(x: float | None) -> float | None:
+    """NaN/inf are not valid strict JSON. Emit ``None`` instead so ``json.dumps(..., allow_nan=
+    False)`` and the Pydantic consumer never choke. The vendored estimator returns
+    ``neg_control_effect=float('nan')`` when no mapped control survives support-checking (a real
+    abstain verdict); this is the emission-boundary sanitizer that keeps the manifest JSON-strict
+    without touching the verbatim estimator."""
+    if isinstance(x, float) and (math.isnan(x) or math.isinf(x)):
+        return None
+    return x
+
+
+def _sanitize_effects(effects: dict[str, float]) -> dict[str, float]:
+    """Drop NaN/inf residuals from the per-control effects dict (same JSON-strictness reason)."""
+    return {k: v for k, v in effects.items()
+            if not (isinstance(v, float) and (math.isnan(v) or math.isinf(v)))}
 
 
 def _tokens(s: str) -> set[str]:
@@ -83,6 +109,12 @@ class CandidateEffect:
     guard_trips: bool | None
     guard_confidence: str          # "high" | "low/abstain" | "unverified"
     guard_reason: str | None
+    # --- Full guard verdict fields (the exact keys the sidira-simulator consumer schema reads,
+    #     backend/sidira_simulator/schemas/estimability.py::CandidateEffect). Additive/defaulted so
+    #     the unsupportable / unverified rows and any direct constructor call stay valid.
+    neg_control_effects: dict[str, float] = field(default_factory=dict)
+    guard_floor: float | None = None      # from GuardedEstimate.floor (the |residual| trip threshold)
+    guard_ratio: float | None = None      # the indistinguishability ratio the guard was run with
 
 
 @dataclass
@@ -211,40 +243,61 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
     covars = [c.name for c in cols if c.role == "covariate" and c.has_variation
               and c.dtype in ("number", "bool")]
 
+    # The store's known column names (from the profiles). A mapped negative control that names a
+    # column NOT in the store (a stale/typo'd map entry) must never reach `load_frame(need)` — for
+    # the frame-only `load_frame=lambda cols: df[cols]` an absent name raises KeyError and would
+    # abort the ENTIRE manifest (total abstain). Filter such names out here so the candidate simply
+    # degrades to the no-available-NC "unverified" path instead.
+    known_cols = {c.name for c in cols}
+
     nc_map = neg_control_map or {}
     effects: list[CandidateEffect] = []
     for T in treatments:
         X = [c for c in covars if c != T]
         for Y in outcomes:
-            need = list(dict.fromkeys([T, Y, *X, *nc_map.get(Y, [])]))  # one query, deduped
-            df = load_frame(need)                               # the ONE query, at build time
             # Caller/LLM-vouched negative controls for this outcome (the MAP step); no
-            # sibling-outcome auto-NC — a co-moved sibling would false-trip the guard.
-            ncs = [c for c in nc_map.get(Y, []) if c in df.columns and c != Y and c != T]
+            # sibling-outcome auto-NC — a co-moved sibling would false-trip the guard. Restrict to
+            # names known to the store BEFORE building `need`, so an absent NC never crashes the
+            # load; re-intersect with df.columns after load as defense for real (Snowflake)
+            # load_frames that could drop a column.
+            vouched = [c for c in nc_map.get(Y, []) if c in known_cols and c != Y and c != T]
+            need = list(dict.fromkeys([T, Y, *X, *vouched]))    # one query, deduped
+            df = load_frame(need)                               # the ONE query, at build time
+            ncs = [c for c in vouched if c in df.columns]
             sup = support_check(df, T, Y, X)
             if not sup.supportable:
                 effects.append(CandidateEffect(
                     T, Y, X, False, sup.reasons, sup.n_treat, sup.n_control,
                     None, None, None, None, None, None,
                     neg_controls=[], neg_control_effect=None, guard_trips=None,
-                    guard_confidence="unverified", guard_reason=None))
+                    guard_confidence="unverified", guard_reason=None,
+                    neg_control_effects={}, guard_floor=None, guard_ratio=None))
                 continue
             if ncs:
-                g = negative_control_guard(df, T, Y, ncs, X)
+                g = negative_control_guard(df, T, Y, ncs, X,
+                                           floor=NC_GUARD_FLOOR, ratio=NC_GUARD_RATIO)
                 est = g.estimate
-                neg_control_effect, guard_trips = g.neg_control_effect, g.trips
+                # Sanitize NaN/inf at the emission boundary (JSON-strictness) — the guard returns
+                # neg_control_effect=NaN when no mapped control survives support-checking; keep the
+                # rest of that real abstain verdict (trips=True, low/abstain, reason, floor/ratio).
+                neg_control_effect, guard_trips = _nan_to_none(g.neg_control_effect), g.trips
                 guard_confidence, guard_reason = g.confidence, g.reason
+                neg_control_effects = _sanitize_effects(g.neg_control_effects)
+                guard_floor, guard_ratio = g.floor, NC_GUARD_RATIO
             else:
                 est = estimate(df, T, Y, X)
                 neg_control_effect, guard_trips = None, None
                 guard_confidence, guard_reason = "unverified", None
+                neg_control_effects = {}
+                guard_floor, guard_ratio = None, None
             effects.append(CandidateEffect(
                 T, Y, X, True, [], sup.n_treat, sup.n_control,
                 est.naive_ate, est.t_learner_ate, est.ipw_ate,
                 est.overlap_fraction, est.naive_adjusted_gap, est.sign_adjusted,
                 neg_controls=ncs, neg_control_effect=neg_control_effect,
                 guard_trips=guard_trips, guard_confidence=guard_confidence,
-                guard_reason=guard_reason))
+                guard_reason=guard_reason, neg_control_effects=neg_control_effects,
+                guard_floor=guard_floor, guard_ratio=guard_ratio))
     return Manifest("1.0", customer_id, setup_id, pack_version, feature_store,
                     cols, links, effects, truncated)
 
