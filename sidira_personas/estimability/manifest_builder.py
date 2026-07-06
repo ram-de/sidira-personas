@@ -239,13 +239,24 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
     truncated: dict = {}
 
     # Config-declared levers (customer's real KPIs). Restrict discovery to the declared set, then
-    # record any declared lever that did NOT survive — because it wasn't discovered as a binary
-    # {0,1} treatment (multi-level, non-existent, or an outcome). Honest, not silent.
+    # record any declared lever that did NOT survive — with an ACCURATE reason. Only name a lever
+    # `not_binary` when we can PROVE it (it isn't in the verified `binary_treatment_cols`); a lever
+    # that IS binary but was still dropped (never linked to a capability in the capability path, or
+    # it's an outcome-role column) is recorded generically as `dropped`, never mislabeled.
     if explicit_treatments is not None:
         treatments = [t for t in treatments if t in explicit_treatments]
-        declared_not_binary = sorted(explicit_treatments - set(treatments))
-        if declared_not_binary:
-            truncated["treatments_declared_not_binary"] = declared_not_binary
+        dropped = explicit_treatments - set(treatments)
+        if dropped:
+            if binary_treatment_cols is not None:
+                not_binary = sorted(d for d in dropped if d not in binary_treatment_cols)
+                other = sorted(d for d in dropped if d in binary_treatment_cols)
+                if not_binary:
+                    truncated["treatments_declared_not_binary"] = not_binary
+                if other:
+                    truncated["treatments_declared_dropped"] = other
+            else:
+                # Binariness unverifiable (no frame) — don't claim a reason we can't prove.
+                truncated["treatments_declared_dropped"] = sorted(dropped)
 
     # Outcomes must be numeric for the empirical estimator (it does Y.to_numpy(float)). A
     # hint-named but non-numeric column (e.g. a `signup_date` matched by the "signup" hint) is
@@ -257,15 +268,22 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
     outcomes = sorted(c.name for c in cols if c.role == "outcome_candidate" and c.has_variation
                       and c.dtype in ("number", "bool"))
 
-    # Config-declared outcomes that failed to enter the grid — record, don't silently drop. A
-    # declared name PRESENT in the frame but excluded here is non-numeric (or non-varying) and so
-    # not empirically estimable; a declared name ABSENT from the frame entirely is a separate case.
+    # Config-declared outcomes that failed to enter the grid — record with an ACCURATE reason,
+    # don't silently drop. A declared name present but excluded is EITHER non-numeric OR present-
+    # but-non-varying (a constant column can't be an outcome); these are distinct and recorded
+    # under separate keys so an operator isn't misled. A declared name ABSENT from the frame is a
+    # third case.
     if explicit_outcomes:
-        col_names = {c.name for c in cols}
-        not_numeric = sorted(n for n in explicit_outcomes if n in col_names and n not in outcomes)
+        by_name = {c.name: c for c in cols}
+        excluded = [n for n in explicit_outcomes if n in by_name and n not in outcomes]
+        not_numeric = sorted(n for n in excluded if by_name[n].dtype not in ("number", "bool"))
+        non_varying = sorted(n for n in excluded
+                             if by_name[n].dtype in ("number", "bool") and not by_name[n].has_variation)
+        not_found = sorted(n for n in explicit_outcomes if n not in by_name)
         if not_numeric:
             truncated["outcomes_declared_not_numeric"] = not_numeric
-        not_found = sorted(n for n in explicit_outcomes if n not in col_names)
+        if non_varying:
+            truncated["outcomes_declared_non_varying"] = non_varying
         if not_found:
             truncated["outcomes_declared_not_found"] = not_found
 
@@ -480,10 +498,18 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
     } for c in df.columns]
     binary_treatment_cols = {c for c in df.columns if _is_binary_01(df[c])}
     # Config-driven discovery: convert the list params to sets (or None) once, threaded into both
-    # the auto-NC map (so declared outcomes are recognized as siblings) and the builder.
-    explicit_outcomes = set(outcomes) if outcomes else None
-    extra_hints = set(extra_outcome_hints) if extra_outcome_hints else None
-    explicit_treatments = set(treatments) if treatments else None
+    # the auto-NC map (so declared outcomes are recognized as siblings) and the builder. A bare
+    # YAML scalar (`outcomes: completion_rate`) arrives as a str — wrap it so it becomes a single
+    # column name, NOT `set("completion_rate")` (a set of characters that silently matches nothing).
+    def _as_set(v):
+        if not v:
+            return None
+        if isinstance(v, str):
+            return {v}
+        return set(v)
+    explicit_outcomes = _as_set(outcomes)
+    extra_hints = _as_set(extra_outcome_hints)
+    explicit_treatments = _as_set(treatments)
     # Opt-in fallback: with no caller/LLM-vouched map, use the auto sibling-outcome negative
     # controls so the guard runs (else every candidate ships guard_trips=None). Heuristic +
     # conservative; see default_neg_control_map for the false-trip caveat.

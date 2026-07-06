@@ -120,6 +120,35 @@ def test_declared_outcome_non_numeric_and_absent_recorded():
     assert m.truncated.get("outcomes_declared_not_found") == ["ghost_metric"]
 
 
+def test_declared_outcome_non_varying_recorded_separately():
+    """A present, numeric, but CONSTANT declared outcome is recorded under its own reason key
+    (`non_varying`), NOT mislabeled as non-numeric — accurate operator-facing accounting."""
+    df = _streaming_frame()
+    df["flat_metric"] = 0.5          # present, numeric, but constant -> cannot be an outcome
+    m = build_manifest_from_frame(df, "c", "s", "v", "fs", outcomes=["flat_metric"])
+    assert m.truncated.get("outcomes_declared_non_varying") == ["flat_metric"]
+    # and it is NOT misfiled under the non-numeric key.
+    assert "flat_metric" not in m.truncated.get("outcomes_declared_not_numeric", [])
+
+
+# --- YAML-scalar robustness: a bare `outcomes: completion_rate` must not become a char set ---
+
+def test_declared_outcome_bare_string_scalar_coerced():
+    df = _streaming_frame()
+    # A single string (as a bare YAML scalar would arrive) is treated as ONE column name,
+    # not set("completion_rate") (a set of characters that would silently match nothing).
+    m = build_manifest_from_frame(df, "c", "s", "v", "fs", outcomes="completion_rate")
+    assert any(c.outcome == "completion_rate" and c.supportable for c in m.candidate_effects)
+    assert m.truncated == {}          # no spurious not_found from stray single characters
+
+
+def test_declared_treatment_bare_string_scalar_coerced():
+    df = _streaming_frame()
+    m = build_manifest_from_frame(
+        df, "c", "s", "v", "fs", outcomes=["completion_rate"], treatments="autoplay_enabled")
+    assert {c.treatment for c in m.candidate_effects} == {"autoplay_enabled"}
+
+
 # --- 4. backward-compat: new params default-None -> identical candidate set --------------
 
 def _commerce_frame(n: int = 2000) -> pd.DataFrame:
