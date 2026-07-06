@@ -498,6 +498,12 @@ def run_pipeline(
                 # disables it; anything else (incl. omitted) keeps the sensible default-on.
                 auto_neg_controls=str(est_cfg.get("auto_neg_controls", True)).strip().lower()
                 not in ("false", "0", "no", "off"),
+                # Config-driven outcome/lever discovery (M1 iter-4, #572): a customer declares
+                # their real KPIs/levers so non-commerce verticals (streaming, etc.) don't starve
+                # the hardcoded commerce hints. Omitted/empty -> None -> unchanged discovery.
+                outcomes=est_cfg.get("outcomes") or None,
+                extra_outcome_hints=est_cfg.get("extra_outcome_hints") or None,
+                treatments=est_cfg.get("treatments") or None,
             )
             estimability_manifest = asdict(m)
             log(f"[estimability] {len(m.candidate_effects)} candidate effect(s), "
