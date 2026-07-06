@@ -317,7 +317,6 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
     nc_map = neg_control_map or {}
     effects: list[CandidateEffect] = []
     for T in treatments:
-        X = [c for c in covars if c != T]
         for Y in outcomes:
             # Caller/LLM-vouched negative controls for this outcome (the MAP step); no
             # sibling-outcome auto-NC — a co-moved sibling would false-trip the guard. Restrict to
@@ -325,6 +324,12 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
             # load; re-intersect with df.columns after load as defense for real (Snowflake)
             # load_frames that could drop a column.
             vouched = [c for c in nc_map.get(Y, []) if c in known_cols and c != Y and c != T]
+            # The negative controls must NOT also be adjustment covariates — adjusting for a column
+            # while testing it as an outcome-side control neuters its residual (~0) and FALSELY
+            # passes the guard. Exclude them from X per-outcome so the recorded covariates match
+            # what is actually adjusted for, and the guard tests genuine controls (the guard also
+            # strips them defensively; this keeps CandidateEffect.covariates honest).
+            X = [c for c in covars if c != T and c not in vouched]
             need = list(dict.fromkeys([T, Y, *X, *vouched]))    # one query, deduped
             df = load_frame(need)                               # the ONE query, at build time
             ncs = [c for c in vouched if c in df.columns]

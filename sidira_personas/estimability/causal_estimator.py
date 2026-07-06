@@ -188,6 +188,16 @@ def negative_control_guard(df, treatment, outcome, neg_controls, covariates,
     confounding (a weak set under-trips); nominating the controls is a domain/LLM judgment.
     """
     names = [neg_controls] if isinstance(neg_controls, str) else list(neg_controls)
+    # A negative control must NOT also be in the adjustment set. If it is, `estimate(treatment,
+    # nc, covariates)` regresses the control on the treatment while CONTROLLING FOR the control
+    # itself -> the residual collapses to ~0, the guard sees "no confounding" and FALSELY passes a
+    # purely-confounded estimate (observed on segment-confounded data: a vouched demographic control
+    # that is also a covariate neutered itself -> trust granted to a confounded effect). Strip the
+    # controls from the covariates so each is tested as a genuine outcome-side control, never
+    # adjusted away. No-op when the sets are disjoint (the validated campaign runs), so behavior
+    # there is unchanged.
+    _ncset = set(names)
+    covariates = [c for c in covariates if c not in _ncset]
     est = estimate(df, treatment, outcome, covariates)
     # Support-check each control before estimating it. The main outcome Y is gated by the caller,
     # but the controls are not: a null-bearing control whose non-null rows leave an arm EMPTY

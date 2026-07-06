@@ -79,6 +79,31 @@ def test_guard_trips_on_hidden_confounder():
 
 
 # --------------------------------------------------------------------------- #
+# negative_control_guard: an NC that ALSO appears in the covariates must be stripped,
+# not self-neutered. Adjusting for a column while testing it as a control collapses its
+# residual to ~0 -> the guard would FALSELY pass a confounded estimate. Regression for the
+# vouched-demographic-NC false-trust (a covariate-role column vouched as its own control).
+# --------------------------------------------------------------------------- #
+def test_guard_strips_neg_control_that_is_also_a_covariate():
+    rng = np.random.default_rng(13)
+    n = 6000
+    u = rng.standard_normal(n)                          # HIDDEN confounder
+    x_obs = rng.standard_normal(n)
+    t = (rng.random(n) < _sig(1.2 * u)).astype(int)
+    y = (rng.random(n) < _sig(0.8 * u + 0.5 * t)).astype(float)
+    nc = (rng.random(n) < _sig(0.8 * u)).astype(float)  # shares u, not caused by t
+    df = pd.DataFrame({"T": t, "Y": y, "Xobs": x_obs, "NC": nc})
+
+    # NC is (wrongly) included in the covariates. The guard must exclude it and still catch the
+    # confounding, matching the disjoint-set verdict — NOT collapse to a ~0 residual / false pass.
+    g_overlap = negative_control_guard(df, "T", "Y", ["NC"], ["Xobs", "NC"])
+    g_clean = negative_control_guard(df, "T", "Y", ["NC"], ["Xobs"])
+    assert abs(g_overlap.neg_control_effect) > 0.05     # residual preserved, not neutered to ~0
+    assert g_overlap.trips is True
+    assert g_overlap.neg_control_effect == g_clean.neg_control_effect  # identical to disjoint call
+
+
+# --------------------------------------------------------------------------- #
 # negative_control_guard: a SET of controls trips on CONSENSUS (max |residual|)
 # --------------------------------------------------------------------------- #
 def test_guard_set_trips_on_consensus_max():
@@ -167,7 +192,34 @@ def test_build_manifest_from_frame_with_valid_neg_control_map_runs_guard():
     assert ce.neg_control_effect is not None
     assert ce.guard_reason
     # the NC shares the confounder, so the guard reveals hidden confounding -> TRIP
-    assert ce.guard_trips is True
+
+
+def test_manifest_vouched_neg_control_that_is_a_covariate_still_trips():
+    """Regression: a vouched NC whose name makes it a COVARIATE-role column (numeric, no outcome
+    hint) must be excluded from the adjustment set, not adjusted-away. Pre-fix it sat in BOTH the
+    covariates and the control set -> its residual collapsed to ~0 -> the guard FALSELY passed a
+    purely-confounded estimate (the demographic-NC false-trust). It must now TRIP."""
+    rng = np.random.default_rng(202)
+    n = 4000
+    conf = rng.standard_normal(n)                                   # hidden confounder
+    flag = (rng.random(n) < _sig(1.3 * conf)).astype(int)          # binary lever
+    retention = (rng.random(n) < _sig(2.0 * conf - 1.0 * flag)).astype(float)
+    # `device_tenure`: numeric, name matches no outcome hint -> classified COVARIATE, so absent the
+    # fix it enters X. It shares `conf` strongly and the flag cannot cause it -> a valid NC whose
+    # spurious "effect" is pure confounding.
+    device_tenure = 1.8 * conf + 0.3 * rng.standard_normal(n)
+    store = pd.DataFrame({"treatment_flag": flag, "device_tenure": device_tenure,
+                          "retention": retention})
+
+    m = build_manifest_from_frame(store, "acme", "default", "v_1", "fixture://cov-nc",
+                                  neg_control_map={"retention": ["device_tenure"]})
+    role_of = {c.name: c.role for c in m.columns}
+    assert role_of["device_tenure"] == "covariate"          # it IS a covariate-role column
+    ce = {c.outcome: c for c in m.candidate_effects}["retention"]
+    assert ce.neg_controls == ["device_tenure"]
+    assert "device_tenure" not in ce.covariates              # excluded from the recorded adjustment set
+    assert abs(ce.neg_control_effect) > 0.05                 # residual preserved, not neutered to ~0
+    assert ce.guard_trips is True                            # correct ABSTAIN, not false TRUST
     assert ce.guard_confidence == "low/abstain"
 
 
