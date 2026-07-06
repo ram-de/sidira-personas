@@ -99,3 +99,5 @@ estimability:
   max_treatments: 8
   max_outcomes: 8
   neg_control_map: {}      # optional: outcome_col -> [negative-control cols] (LLM/domain-vouched)
+  auto_neg_controls: true  # when no vouched map, auto-nominate sibling outcomes as NC so the guard
+                           # RUNS (guard_trips True/False, not None). Heuristic, can false-trip.

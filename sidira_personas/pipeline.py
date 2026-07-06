@@ -489,6 +489,15 @@ def run_pipeline(
                 max_outcomes=int(est_cfg.get("max_outcomes", 8)),
                 neg_control_map=est_cfg.get("neg_control_map") or None,
                 max_rows=int(est_cfg.get("max_rows", 50_000)),
+                # When no explicit vouched map is supplied, auto-nominate sibling outcomes as
+                # negative controls so the guard RUNS and candidates carry guard_trips True/False
+                # (else all None -> the downstream watchdog can only say CANT_VALIDATE). Heuristic,
+                # can false-trip (routes to LLM, never ships a wrong estimate); on by default,
+                # disable via `estimability.auto_neg_controls: false`. See default_neg_control_map.
+                # Robust parse: an explicit false-like value (bool False or "false"/"0"/"no"/"off")
+                # disables it; anything else (incl. omitted) keeps the sensible default-on.
+                auto_neg_controls=str(est_cfg.get("auto_neg_controls", True)).strip().lower()
+                not in ("false", "0", "no", "off"),
             )
             estimability_manifest = asdict(m)
             log(f"[estimability] {len(m.candidate_effects)} candidate effect(s), "

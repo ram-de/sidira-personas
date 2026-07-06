@@ -337,11 +337,50 @@ def _is_binary_01(s: pd.Series) -> bool:
         return False
 
 
+def default_neg_control_map(column_profiles: list[dict],
+                            *, max_controls: int = 5) -> dict[str, list[str]]:
+    """Build-time FALLBACK negative-control map (the negative-control-OUTCOME design, auto-nominated).
+
+    For each outcome-candidate column ``Y``, nominate up to ``max_controls`` OTHER
+    outcome-candidate columns (name != Y, has_variation, numeric) as its negative controls —
+    "metrics the treatment shouldn't move." Returns ``{Y: [nc, ...]}`` for every eligible outcome
+    that has at least one sibling; outcomes with no sibling are omitted.
+
+    WHY this exists: without ANY negative-control map the manifest's guard never runs, so every
+    candidate ships ``guard_trips=None`` and the downstream watchdog can only answer CANT_VALIDATE.
+    This auto-map lets the guard actually run on a frame-only persona build, so candidates get a
+    real ``guard_trips`` True/False and the watchdog can CONFIRM/CONTRADICT.
+
+    HONEST CAVEAT — this is a HEURISTIC, not a vouched control. A lever frequently moves several
+    metrics together (e.g. retention AND conversion), so some "other outcome" nominated here may be
+    LEGITIMATELY affected by the treatment; using it as a negative control can then FALSE-TRIP the
+    guard (a spurious abstain). That is deliberately conservative — a false trip only routes the
+    effect to the LLM, it never ships a wrong empirical estimate. The reviewable-card / LLM
+    nomination step (#565) later refines this into domain/LLM-vouched controls; this auto-map is
+    the fallback, not the final word. It is used only when the caller supplies no explicit
+    ``neg_control_map``.
+
+    Only numeric ("number"/"bool"), varying outcome candidates are nominated — the exact set that
+    can enter the empirical grid, so no nominated control is a dead entry the guard would skip.
+    """
+    outcomes = [c for c in _classify(column_profiles)
+                if c.role == "outcome_candidate" and c.has_variation
+                and c.dtype in ("number", "bool")]
+    names = [c.name for c in outcomes]
+    nc_map: dict[str, list[str]] = {}
+    for y in names:
+        controls = [n for n in names if n != y][:max_controls]
+        if controls:
+            nc_map[y] = controls
+    return nc_map
+
+
 def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
                               pack_version: str, feature_store: str,
                               max_treatments: int = 8, max_outcomes: int = 8,
                               neg_control_map: dict[str, list[str]] | None = None,
-                              max_rows: int = 50_000) -> Manifest:
+                              max_rows: int = 50_000,
+                              auto_neg_controls: bool = False) -> Manifest:
     """Frame-only convenience: derive column profiles from `df` itself and build the manifest.
 
     No crawler Capabilities are available in this repo, so treatment candidates are discovered
@@ -351,6 +390,14 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
     levers (a 2-level {30,40} or a 3-level {0,1,2} column is NOT a 0/1 treatment and is out of
     scope for the empirical route). `neg_control_map` (outcome -> [vouched NC columns]) is
     passed through unchanged.
+
+    `auto_neg_controls` (default False, so this convenience stays byte-compatible with callers
+    that expect the conservative no-auto-NC contract) opts IN to the build-time FALLBACK: when it
+    is set AND no explicit `neg_control_map` is supplied, `default_neg_control_map` nominates
+    sibling outcomes as auto negative controls so the guard actually RUNS and candidates carry a
+    real `guard_trips` True/False rather than None (the downstream CANT_VALIDATE). It is a
+    heuristic that can false-trip — see `default_neg_control_map` for the honest caveat; the
+    persona build (`run_pipeline`) opts in, direct callers get the conservative default.
 
     BOUNDED PRECOMPUTE: this build is synchronous before the pack returns, so its cost is
     capped. When `len(df) > max_rows` the effect grid is fit on a deterministic random sample
@@ -370,6 +417,11 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
         "null_fraction": float(df[c].isna().mean()),
     } for c in df.columns]
     binary_treatment_cols = {c for c in df.columns if _is_binary_01(df[c])}
+    # Opt-in fallback: with no caller/LLM-vouched map, use the auto sibling-outcome negative
+    # controls so the guard runs (else every candidate ships guard_trips=None). Heuristic +
+    # conservative; see default_neg_control_map for the false-trip caveat.
+    if neg_control_map is None and auto_neg_controls:
+        neg_control_map = default_neg_control_map(column_profiles)
     return build_manifest(customer_id, setup_id, pack_version, feature_store,
                           column_profiles, capabilities=[],
                           load_frame=lambda cols: df[cols],

@@ -6,7 +6,7 @@ No Snowflake / R2 / pipeline wiring — those land in Phase 2.
 Public API:
   - support_check / estimate / negative_control_guard  (causal_estimator)
   - Support / Estimate / GuardedEstimate dataclasses
-  - build_manifest / build_manifest_from_frame  (manifest_builder)
+  - build_manifest / build_manifest_from_frame / default_neg_control_map  (manifest_builder)
   - Manifest / CandidateEffect / ColumnEntry / CapabilityLink dataclasses
 """
 from __future__ import annotations
@@ -26,6 +26,7 @@ from .manifest_builder import (
     Manifest,
     build_manifest,
     build_manifest_from_frame,
+    default_neg_control_map,
 )
 
 __all__ = [
@@ -41,4 +42,5 @@ __all__ = [
     "Manifest",
     "build_manifest",
     "build_manifest_from_frame",
+    "default_neg_control_map",
 ]
