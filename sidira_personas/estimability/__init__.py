@@ -20,6 +20,7 @@ from .causal_estimator import (
     support_check,
 )
 from .manifest_builder import (
+    MAX_NC_DIAGNOSTICS,
     CandidateEffect,
     CapabilityLink,
     ColumnEntry,
@@ -43,4 +44,5 @@ __all__ = [
     "build_manifest",
     "build_manifest_from_frame",
     "default_neg_control_map",
+    "MAX_NC_DIAGNOSTICS",
 ]
