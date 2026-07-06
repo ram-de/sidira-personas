@@ -29,6 +29,7 @@ No hard dependency on the product. Deps: numpy, pandas, scikit-learn (via causal
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
+import math
 import re
 import pandas as pd
 import pandas.api.types as ptypes
@@ -46,6 +47,23 @@ _TOKEN = re.compile(r"[a-z0-9]+")
 # ratio=1.5; campaign iter1-iter5).
 NC_GUARD_FLOOR = 0.05
 NC_GUARD_RATIO = 1.5
+
+
+def _nan_to_none(x: float | None) -> float | None:
+    """NaN/inf are not valid strict JSON. Emit ``None`` instead so ``json.dumps(..., allow_nan=
+    False)`` and the Pydantic consumer never choke. The vendored estimator returns
+    ``neg_control_effect=float('nan')`` when no mapped control survives support-checking (a real
+    abstain verdict); this is the emission-boundary sanitizer that keeps the manifest JSON-strict
+    without touching the verbatim estimator."""
+    if isinstance(x, float) and (math.isnan(x) or math.isinf(x)):
+        return None
+    return x
+
+
+def _sanitize_effects(effects: dict[str, float]) -> dict[str, float]:
+    """Drop NaN/inf residuals from the per-control effects dict (same JSON-strictness reason)."""
+    return {k: v for k, v in effects.items()
+            if not (isinstance(v, float) and (math.isnan(v) or math.isinf(v)))}
 
 
 def _tokens(s: str) -> set[str]:
@@ -225,16 +243,27 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
     covars = [c.name for c in cols if c.role == "covariate" and c.has_variation
               and c.dtype in ("number", "bool")]
 
+    # The store's known column names (from the profiles). A mapped negative control that names a
+    # column NOT in the store (a stale/typo'd map entry) must never reach `load_frame(need)` — for
+    # the frame-only `load_frame=lambda cols: df[cols]` an absent name raises KeyError and would
+    # abort the ENTIRE manifest (total abstain). Filter such names out here so the candidate simply
+    # degrades to the no-available-NC "unverified" path instead.
+    known_cols = {c.name for c in cols}
+
     nc_map = neg_control_map or {}
     effects: list[CandidateEffect] = []
     for T in treatments:
         X = [c for c in covars if c != T]
         for Y in outcomes:
-            need = list(dict.fromkeys([T, Y, *X, *nc_map.get(Y, [])]))  # one query, deduped
-            df = load_frame(need)                               # the ONE query, at build time
             # Caller/LLM-vouched negative controls for this outcome (the MAP step); no
-            # sibling-outcome auto-NC — a co-moved sibling would false-trip the guard.
-            ncs = [c for c in nc_map.get(Y, []) if c in df.columns and c != Y and c != T]
+            # sibling-outcome auto-NC — a co-moved sibling would false-trip the guard. Restrict to
+            # names known to the store BEFORE building `need`, so an absent NC never crashes the
+            # load; re-intersect with df.columns after load as defense for real (Snowflake)
+            # load_frames that could drop a column.
+            vouched = [c for c in nc_map.get(Y, []) if c in known_cols and c != Y and c != T]
+            need = list(dict.fromkeys([T, Y, *X, *vouched]))    # one query, deduped
+            df = load_frame(need)                               # the ONE query, at build time
+            ncs = [c for c in vouched if c in df.columns]
             sup = support_check(df, T, Y, X)
             if not sup.supportable:
                 effects.append(CandidateEffect(
@@ -248,9 +277,12 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
                 g = negative_control_guard(df, T, Y, ncs, X,
                                            floor=NC_GUARD_FLOOR, ratio=NC_GUARD_RATIO)
                 est = g.estimate
-                neg_control_effect, guard_trips = g.neg_control_effect, g.trips
+                # Sanitize NaN/inf at the emission boundary (JSON-strictness) — the guard returns
+                # neg_control_effect=NaN when no mapped control survives support-checking; keep the
+                # rest of that real abstain verdict (trips=True, low/abstain, reason, floor/ratio).
+                neg_control_effect, guard_trips = _nan_to_none(g.neg_control_effect), g.trips
                 guard_confidence, guard_reason = g.confidence, g.reason
-                neg_control_effects = g.neg_control_effects
+                neg_control_effects = _sanitize_effects(g.neg_control_effects)
                 guard_floor, guard_ratio = g.floor, NC_GUARD_RATIO
             else:
                 est = estimate(df, T, Y, X)

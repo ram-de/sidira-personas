@@ -102,6 +102,91 @@ def test_candidate_without_available_nc_has_none_guard_fields():
     assert ce.guard_confidence == "unverified"
 
 
+def test_absent_neg_control_column_degrades_not_aborts():
+    """Fix 2: a neg_control_map naming a column ABSENT from the store must NOT abort the build
+    (KeyError inside load_frame). The candidate degrades to the unverified path and the manifest
+    still carries every OTHER candidate."""
+    rng = np.random.default_rng(77)
+    n = 4000
+    conf = rng.standard_normal(n)
+    flag = (rng.random(n) < _sig(1.3 * conf)).astype(int)
+    store = pd.DataFrame({
+        "treatment_flag": flag,
+        "conf": conf,
+        "retention": (rng.random(n) < _sig(2.0 * conf - flag)).astype(float),
+        "conversion": (rng.random(n) < _sig(1.5 * conf - 0.5 * flag)).astype(float),
+    })
+    # 'ghost_metric' does not exist in the store; 'conversion' is a real sibling outcome
+    m = build_manifest_from_frame(store, "acme", "default", "v_1", "fixture://ghost",
+                                  neg_control_map={"retention": ["ghost_metric"]})
+
+    by_outcome = {e.outcome: e for e in m.candidate_effects}
+    # build did not abort — both candidates present
+    assert {"retention", "conversion"} <= set(by_outcome)
+    ce = by_outcome["retention"]
+    assert ce.supportable is True
+    # stale NC name filtered out -> no available NC -> honest CAN'T-VALIDATE
+    assert ce.neg_controls == []
+    assert ce.guard_trips is None
+    assert ce.guard_confidence == "unverified"
+    assert ce.neg_control_effect is None
+    assert ce.neg_control_effects == {}
+
+
+def test_thin_neg_control_serializes_effect_as_none_not_nan():
+    """Fix 1: a mapped NC that IS present but degenerate (unusable) -> the guard abstains with
+    neg_control_effect=NaN internally, which must be EMITTED as None (strict JSON), while the rest
+    of the abstain verdict is preserved."""
+    rng = np.random.default_rng(83)
+    n = 4000
+    x = rng.standard_normal(n)
+    t = (rng.random(n) < 0.5).astype(int)
+    y = (rng.random(n) < _sig(0.5 * t + 0.3 * x)).astype(float)
+    # NC whose non-null rows fall entirely in one arm -> not support-checkable -> guard abstains
+    nc_bad = np.where(t == 1, (rng.random(n) < 0.5).astype(float), np.nan)
+    store = pd.DataFrame({"treatment_flag": t, "conf": x, "retention": y, "pre_bad": nc_bad})
+
+    m = build_manifest_from_frame(store, "acme", "default", "v_1", "fixture://thin-nc",
+                                  neg_control_map={"retention": ["pre_bad"]})
+    ce = {e.outcome: e for e in m.candidate_effects}["retention"]
+    assert ce.supportable is True
+    assert ce.neg_control_effect is None            # NaN sanitized to None at emission
+    assert ce.neg_control_effects == {}             # no usable control survived
+    assert ce.guard_trips is True                   # real abstain verdict preserved
+    assert ce.guard_confidence == "low/abstain"
+    assert ce.guard_reason
+    assert ce.guard_floor == NC_GUARD_FLOOR
+    assert ce.guard_ratio == NC_GUARD_RATIO
+
+
+def test_manifest_json_has_no_nan_or_infinity_tokens():
+    """Fix 1/3: the whole manifest serializes under strict JSON (allow_nan=False) — proving no
+    NaN/Infinity leaks anywhere in the candidate grid, across a supportable+guarded candidate and
+    a degenerate-NC (internally-NaN) candidate in the same build."""
+    rng = np.random.default_rng(89)
+    n = 4000
+    conf = rng.standard_normal(n)
+    flag = (rng.random(n) < _sig(1.3 * conf)).astype(int)
+    x = rng.standard_normal(n)
+    store = pd.DataFrame({
+        "treatment_flag": flag,
+        "conf": conf,
+        "retention": (rng.random(n) < _sig(2.0 * conf - flag)).astype(float),
+        "pre_signup": (rng.random(n) < _sig(1.8 * conf)).astype(float),          # valid NC
+        "pre_bad": np.where(flag == 1, (rng.random(n) < 0.5).astype(float), np.nan),  # degenerate NC
+        "conversion": (rng.random(n) < _sig(1.5 * conf - 0.5 * flag + 0.1 * x)).astype(float),
+    })
+    m = build_manifest_from_frame(
+        store, "acme", "default", "v_1", "fixture://strict",
+        neg_control_map={"retention": ["pre_signup"], "conversion": ["pre_bad"]})
+
+    payload = dataclasses.asdict(m)
+    # allow_nan=False raises ValueError if any NaN/Infinity is present -> must NOT raise
+    text = json.dumps(payload, allow_nan=False)
+    assert "NaN" not in text
+    assert "Infinity" not in text
+
+
 def test_unsupportable_candidate_also_carries_the_guard_keys():
     """An unsupportable candidate (thin arms) still emits the full key set (None/empty), so the
     consumer schema never sees a missing key regardless of the support verdict."""
