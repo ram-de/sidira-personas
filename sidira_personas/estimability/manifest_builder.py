@@ -131,13 +131,24 @@ class Manifest:
     built_at: str | None = None    # stamped by the caller (worker), kept out for determinism
 
 
-def _classify(profiles: list[dict]) -> list[ColumnEntry]:
+def _classify(profiles: list[dict],
+              explicit_outcomes: set[str] | None = None,
+              extra_outcome_hints: set[str] | None = None) -> list[ColumnEntry]:
     """Tag outcomes vs covariates. Treatment status is decided later, by LINKAGE — a
-    covariate must never be demoted just because its name overlaps a capability term."""
+    covariate must never be demoted just because its name overlaps a capability term.
+
+    Outcome discovery is config-driven (non-commerce verticals starve the hardcoded
+    commerce `OUTCOME_HINTS`): a column is an outcome candidate if its name is in the
+    customer-declared `explicit_outcomes` OR its tokens overlap the effective hint set
+    (`OUTCOME_HINTS` plus any `extra_outcome_hints`). Both params default None -> the
+    behavior is BYTE-IDENTICAL to the hint-only classifier."""
+    hints = set(OUTCOME_HINTS) | (extra_outcome_hints or set())
+    declared = explicit_outcomes or set()
     out = []
     for p in profiles:
         name, dc = p["name"], p.get("distinct_count")
-        role = "outcome_candidate" if (_tokens(name) & set(OUTCOME_HINTS)) else "covariate"
+        is_outcome = name in declared or bool(_tokens(name) & hints)
+        role = "outcome_candidate" if is_outcome else "covariate"
         out.append(ColumnEntry(name=name, dtype=p.get("dtype", "unknown"), role=role,
                                distinct_count=dc, null_fraction=float(p.get("null_fraction", 0.0)),
                                has_variation=(dc is None or dc >= 2)))
@@ -185,7 +196,10 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
                    load_frame: Callable[[list[str]], pd.DataFrame],
                    max_treatments: int = 8, max_outcomes: int = 8,
                    neg_control_map: dict[str, list[str]] | None = None,
-                   binary_treatment_cols: set[str] | None = None) -> Manifest:
+                   binary_treatment_cols: set[str] | None = None,
+                   explicit_outcomes: set[str] | None = None,
+                   extra_outcome_hints: set[str] | None = None,
+                   explicit_treatments: set[str] | None = None) -> Manifest:
     """Join columns x capabilities and PRE-FIT the candidate (T->Y) effect grid.
 
     Each SUPPORTABLE effect carries a negative-control verdict ONLY when the caller/LLM has
@@ -202,8 +216,17 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
     treatment promotion to those verified-binary columns. Non-binary levers are out of scope
     for the empirical route and fall through to the LLM; `support_check` also rejects any that
     slip past here, so the non-frame path stays protected (defense in depth).
+
+    Config-driven discovery (all three params default None -> byte-identical to the hint-only
+    path): `explicit_outcomes`/`extra_outcome_hints` widen outcome recognition beyond the
+    hardcoded commerce hints (threaded into `_classify`), and `explicit_treatments` restricts
+    the discovered levers to the customer-declared set. HONESTY: a declared outcome still must
+    be numeric to enter the empirical grid, and a declared treatment still must be binary
+    {0,1} (verified via `binary_treatment_cols`); non-conforming declarations are RECORDED on
+    `Manifest.truncated` (`outcomes_declared_not_numeric`, `outcomes_declared_not_found`,
+    `treatments_declared_not_binary`), never silently dropped.
     """
-    cols = _classify(column_profiles)
+    cols = _classify(column_profiles, explicit_outcomes, extra_outcome_hints)
     links = _link(capabilities, cols)
     if capabilities:
         treatments = sorted({lk.treatment_column for lk in links if lk.treatment_column})
@@ -211,6 +234,18 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
         treatments = _lowcard_treatments(cols)
     if binary_treatment_cols is not None:
         treatments = [t for t in treatments if t in binary_treatment_cols]
+
+    # Truncation/accounting ledger (grid cap + config-declaration accounting). NEVER silently drop.
+    truncated: dict = {}
+
+    # Config-declared levers (customer's real KPIs). Restrict discovery to the declared set, then
+    # record any declared lever that did NOT survive — because it wasn't discovered as a binary
+    # {0,1} treatment (multi-level, non-existent, or an outcome). Honest, not silent.
+    if explicit_treatments is not None:
+        treatments = [t for t in treatments if t in explicit_treatments]
+        declared_not_binary = sorted(explicit_treatments - set(treatments))
+        if declared_not_binary:
+            truncated["treatments_declared_not_binary"] = declared_not_binary
 
     # Outcomes must be numeric for the empirical estimator (it does Y.to_numpy(float)). A
     # hint-named but non-numeric column (e.g. a `signup_date` matched by the "signup" hint) is
@@ -222,8 +257,19 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
     outcomes = sorted(c.name for c in cols if c.role == "outcome_candidate" and c.has_variation
                       and c.dtype in ("number", "bool"))
 
+    # Config-declared outcomes that failed to enter the grid — record, don't silently drop. A
+    # declared name PRESENT in the frame but excluded here is non-numeric (or non-varying) and so
+    # not empirically estimable; a declared name ABSENT from the frame entirely is a separate case.
+    if explicit_outcomes:
+        col_names = {c.name for c in cols}
+        not_numeric = sorted(n for n in explicit_outcomes if n in col_names and n not in outcomes)
+        if not_numeric:
+            truncated["outcomes_declared_not_numeric"] = not_numeric
+        not_found = sorted(n for n in explicit_outcomes if n not in col_names)
+        if not_found:
+            truncated["outcomes_declared_not_found"] = not_found
+
     # Cap the grid — keep the first N (sorted), record the overflow. NEVER silently drop.
-    truncated: dict = {}
     if len(treatments) > max_treatments:
         truncated["treatments_dropped"] = len(treatments) - max_treatments
         treatments = treatments[:max_treatments]
@@ -338,7 +384,9 @@ def _is_binary_01(s: pd.Series) -> bool:
 
 
 def default_neg_control_map(column_profiles: list[dict],
-                            *, max_controls: int = 5) -> dict[str, list[str]]:
+                            *, max_controls: int = 5,
+                            explicit_outcomes: set[str] | None = None,
+                            extra_outcome_hints: set[str] | None = None) -> dict[str, list[str]]:
     """Build-time FALLBACK negative-control map (the negative-control-OUTCOME design, auto-nominated).
 
     For each outcome-candidate column ``Y``, nominate up to ``max_controls`` OTHER
@@ -362,8 +410,12 @@ def default_neg_control_map(column_profiles: list[dict],
 
     Only numeric ("number"/"bool"), varying outcome candidates are nominated — the exact set that
     can enter the empirical grid, so no nominated control is a dead entry the guard would skip.
+
+    `explicit_outcomes`/`extra_outcome_hints` (default None -> unchanged) thread the same
+    config-driven outcome discovery into the classifier, so config-declared (non-hint) outcomes
+    are recognized as siblings and can be auto-nominated as each other's negative controls.
     """
-    outcomes = [c for c in _classify(column_profiles)
+    outcomes = [c for c in _classify(column_profiles, explicit_outcomes, extra_outcome_hints)
                 if c.role == "outcome_candidate" and c.has_variation
                 and c.dtype in ("number", "bool")]
     names = [c.name for c in outcomes]
@@ -380,7 +432,10 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
                               max_treatments: int = 8, max_outcomes: int = 8,
                               neg_control_map: dict[str, list[str]] | None = None,
                               max_rows: int = 50_000,
-                              auto_neg_controls: bool = False) -> Manifest:
+                              auto_neg_controls: bool = False,
+                              outcomes: list[str] | None = None,
+                              extra_outcome_hints: list[str] | None = None,
+                              treatments: list[str] | None = None) -> Manifest:
     """Frame-only convenience: derive column profiles from `df` itself and build the manifest.
 
     No crawler Capabilities are available in this repo, so treatment candidates are discovered
@@ -406,6 +461,13 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
     sample. Enabling the manifest therefore adds only bounded build time (<= max_rows rows x
     the capped `max_treatments` x `max_outcomes` grid), never unbounded. The column catalog's
     `null_fraction`/`distinct_count` are computed on the sample, which is fine.
+
+    Config-driven discovery (all default None -> unchanged): `outcomes` declares the customer's
+    real KPI columns (recognized even when their names match no commerce hint),
+    `extra_outcome_hints` widens the token hint set, and `treatments` restricts the discovered
+    levers to the declared set. Declared outcomes still must be numeric and declared treatments
+    still must be binary {0,1} to enter the empirical grid; non-conforming declarations are
+    recorded on `Manifest.truncated`, never silently dropped (see `build_manifest`).
     """
     # Cap the estimability sample (the pack/clustering upstream already used the full df).
     if len(df) > max_rows:
@@ -417,14 +479,23 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
         "null_fraction": float(df[c].isna().mean()),
     } for c in df.columns]
     binary_treatment_cols = {c for c in df.columns if _is_binary_01(df[c])}
+    # Config-driven discovery: convert the list params to sets (or None) once, threaded into both
+    # the auto-NC map (so declared outcomes are recognized as siblings) and the builder.
+    explicit_outcomes = set(outcomes) if outcomes else None
+    extra_hints = set(extra_outcome_hints) if extra_outcome_hints else None
+    explicit_treatments = set(treatments) if treatments else None
     # Opt-in fallback: with no caller/LLM-vouched map, use the auto sibling-outcome negative
     # controls so the guard runs (else every candidate ships guard_trips=None). Heuristic +
     # conservative; see default_neg_control_map for the false-trip caveat.
     if neg_control_map is None and auto_neg_controls:
-        neg_control_map = default_neg_control_map(column_profiles)
+        neg_control_map = default_neg_control_map(
+            column_profiles, explicit_outcomes=explicit_outcomes, extra_outcome_hints=extra_hints)
     return build_manifest(customer_id, setup_id, pack_version, feature_store,
                           column_profiles, capabilities=[],
                           load_frame=lambda cols: df[cols],
                           max_treatments=max_treatments, max_outcomes=max_outcomes,
                           neg_control_map=neg_control_map,
-                          binary_treatment_cols=binary_treatment_cols)
+                          binary_treatment_cols=binary_treatment_cols,
+                          explicit_outcomes=explicit_outcomes,
+                          extra_outcome_hints=extra_hints,
+                          explicit_treatments=explicit_treatments)
