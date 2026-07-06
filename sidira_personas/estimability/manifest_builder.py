@@ -48,6 +48,9 @@ _TOKEN = re.compile(r"[a-z0-9]+")
 NC_GUARD_FLOOR = 0.05
 NC_GUARD_RATIO = 1.5
 
+# Max candidate-control diagnostics computed per supportable effect (bounds build-time compute).
+MAX_NC_DIAGNOSTICS = 20
+
 
 def _nan_to_none(x: float | None) -> float | None:
     """NaN/inf are not valid strict JSON. Emit ``None`` instead so ``json.dumps(..., allow_nan=
@@ -115,6 +118,14 @@ class CandidateEffect:
     neg_control_effects: dict[str, float] = field(default_factory=dict)
     guard_floor: float | None = None      # from GuardedEstimate.floor (the |residual| trip threshold)
     guard_ratio: float | None = None      # the indistinguishability ratio the guard was run with
+    # Per-candidate-control diagnostic pool for the reviewable lever card (#565): the treatment's
+    # adjusted effect on EACH candidate control column (siblings AND covariate-role columns), keyed
+    # by control name. A large |value| on a control the treatment cannot cause = confounding a human
+    # reviewer should see. Default empty so every existing positional/keyword construction stays valid
+    # and the default-off delta is additive-only (a single empty ``{}`` per candidate, absorbed by the
+    # ``extra="ignore"`` consumer); only populated when build_manifest(nc_diagnostics=True) and only
+    # for the supportable branch. Strictly dict[str, float] (JSON-safe, no NaN/None).
+    nc_diagnostics: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -199,7 +210,8 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
                    binary_treatment_cols: set[str] | None = None,
                    explicit_outcomes: set[str] | None = None,
                    extra_outcome_hints: set[str] | None = None,
-                   explicit_treatments: set[str] | None = None) -> Manifest:
+                   explicit_treatments: set[str] | None = None,
+                   nc_diagnostics: bool = False) -> Manifest:
     """Join columns x capabilities and PRE-FIT the candidate (T->Y) effect grid.
 
     Each SUPPORTABLE effect carries a negative-control verdict ONLY when the caller/LLM has
@@ -314,6 +326,23 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
     # degrades to the no-available-NC "unverified" path instead.
     known_cols = {c.name for c in cols}
 
+    # Candidate-control pool for the reviewable lever-card diagnostics (#565), computed only when
+    # `nc_diagnostics` is on. It is EVERY numeric+varying column (spanning sibling-outcome AND
+    # covariate-role columns) — the card shows the treatment's adjusted effect on all of them so a
+    # human can see which ones move. Sorted for deterministic ordering + truncation. Per (T,Y) we
+    # additionally drop C==T and C==Y at the estimate site.
+    #   * Built FROM `cols` (the profiled column set), so nc_diag_pool ⊆ known_cols by construction —
+    #     the extended `need` load below can never ask load_frame for a column the store didn't
+    #     profile (same guarantee the existing X/vouched load already relies on); the post-load
+    #     `c in df.columns` re-intersection is belt-and-suspenders for mid-build schema drift.
+    #   * Empty when the flag is off, so the default path loads no extra columns and does no extra
+    #     compute. The ONLY default-off manifest delta is an additive empty ``nc_diagnostics: {}`` per
+    #     candidate (like the already-shipped ``neg_control_effects: {}`` / ``guard_floor`` siblings);
+    #     the consumer parses with ``extra="ignore"`` so it is non-breaking, and there is no
+    #     content-hash gate that the extra key could spuriously trip.
+    nc_diag_pool = (sorted(c.name for c in cols if c.has_variation and c.dtype in ("number", "bool"))
+                    if nc_diagnostics else [])
+
     nc_map = neg_control_map or {}
     effects: list[CandidateEffect] = []
     for T in treatments:
@@ -330,7 +359,10 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
             # what is actually adjusted for, and the guard tests genuine controls (the guard also
             # strips them defensively; this keeps CandidateEffect.covariates honest).
             X = [c for c in covars if c != T and c not in vouched]
-            need = list(dict.fromkeys([T, Y, *X, *vouched]))    # one query, deduped
+            # When nc_diagnostics is on, also load the whole numeric+varying pool so the per-control
+            # diagnostics below can be estimated from this SAME single (T,Y) frame — still one query.
+            # dict.fromkeys dedupes, so adding pool names that already appear in X/vouched is free.
+            need = list(dict.fromkeys([T, Y, *X, *vouched, *nc_diag_pool]))   # one query, deduped
             df = load_frame(need)                               # the ONE query, at build time
             ncs = [c for c in vouched if c in df.columns]
             sup = support_check(df, T, Y, X)
@@ -359,6 +391,33 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
                 guard_confidence, guard_reason = "unverified", None
                 neg_control_effects = {}
                 guard_floor, guard_ratio = None, None
+            # Per-candidate-control diagnostics for the reviewable lever card (#565): the treatment's
+            # adjusted effect on each candidate control. Computed only when the flag is on and only in
+            # this supportable branch (the estimate below needs a supportable T->Y arm). The pool is
+            # re-intersected with df.columns (KeyError-safety for a Snowflake load that drops a column,
+            # mirroring the `ncs` handling) and capped at MAX_NC_DIAGNOSTICS.
+            diag: dict[str, float] = {}
+            if nc_diagnostics:
+                pool = [c for c in nc_diag_pool if c != T and c != Y and c in df.columns]
+                if len(pool) > MAX_NC_DIAGNOSTICS:
+                    # PER-CANDIDATE max, not a grid total: the key name says so explicitly so an
+                    # operator can't misread it as the summed count of skipped diagnostics. Every
+                    # supportable candidate diagnoses the same-size pool, so this max is the number of
+                    # controls dropped from the WORST (largest) card — the honest "up to N per card".
+                    dropped_n = len(pool) - MAX_NC_DIAGNOSTICS
+                    truncated["nc_diagnostics_max_dropped_per_candidate"] = max(
+                        truncated.get("nc_diagnostics_max_dropped_per_candidate", 0), dropped_n)
+                    pool = pool[:MAX_NC_DIAGNOSTICS]
+                for C in pool:
+                    # The control must NOT be in its own adjustment set — adjusting for it while
+                    # testing it neuters the residual to ~0 (the same self-neuter bug fixed for the
+                    # guard). Estimate on the covariates MINUS C.
+                    X_c = [x for x in X if x != C]
+                    if not support_check(df, T, C, X_c).supportable:
+                        continue                                # degenerate/thin arm -> no diagnostic
+                    val = _nan_to_none(estimate(df, T, C, X_c).t_learner_ate)
+                    if val is not None:                         # keep the dict strictly float-valued
+                        diag[C] = float(val)
             effects.append(CandidateEffect(
                 T, Y, X, True, [], sup.n_treat, sup.n_control,
                 est.naive_ate, est.t_learner_ate, est.ipw_ate,
@@ -366,7 +425,7 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
                 neg_controls=ncs, neg_control_effect=neg_control_effect,
                 guard_trips=guard_trips, guard_confidence=guard_confidence,
                 guard_reason=guard_reason, neg_control_effects=neg_control_effects,
-                guard_floor=guard_floor, guard_ratio=guard_ratio))
+                guard_floor=guard_floor, guard_ratio=guard_ratio, nc_diagnostics=diag))
     return Manifest("1.0", customer_id, setup_id, pack_version, feature_store,
                     cols, links, effects, truncated)
 
@@ -458,7 +517,8 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
                               auto_neg_controls: bool = False,
                               outcomes: list[str] | None = None,
                               extra_outcome_hints: list[str] | None = None,
-                              treatments: list[str] | None = None) -> Manifest:
+                              treatments: list[str] | None = None,
+                              nc_diagnostics: bool = False) -> Manifest:
     """Frame-only convenience: derive column profiles from `df` itself and build the manifest.
 
     No crawler Capabilities are available in this repo, so treatment candidates are discovered
@@ -491,6 +551,14 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
     levers to the declared set. Declared outcomes still must be numeric and declared treatments
     still must be binary {0,1} to enter the empirical grid; non-conforming declarations are
     recorded on `Manifest.truncated`, never silently dropped (see `build_manifest`).
+
+    `nc_diagnostics` (default False) opts IN to computing, per supportable candidate, the
+    treatment's adjusted effect on every numeric+varying candidate control
+    (`CandidateEffect.nc_diagnostics`) — the data a reviewable lever card (#565) shows so a human
+    can vouch which controls actually reveal confounding. Bounded: capped at MAX_NC_DIAGNOSTICS.
+    Default-off is behaviorally unchanged (no extra columns loaded, no extra compute); the only
+    manifest delta is an additive empty ``nc_diagnostics: {}`` per candidate, which the
+    ``extra="ignore"`` consumer absorbs (no content-hash gate exists to trip on it).
     """
     # Cap the estimability sample (the pack/clustering upstream already used the full df).
     if len(df) > max_rows:
@@ -529,4 +597,5 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
                           binary_treatment_cols=binary_treatment_cols,
                           explicit_outcomes=explicit_outcomes,
                           extra_outcome_hints=extra_hints,
-                          explicit_treatments=explicit_treatments)
+                          explicit_treatments=explicit_treatments,
+                          nc_diagnostics=nc_diagnostics)

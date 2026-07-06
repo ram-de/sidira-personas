@@ -504,6 +504,12 @@ def run_pipeline(
                 outcomes=est_cfg.get("outcomes") or None,
                 extra_outcome_hints=est_cfg.get("extra_outcome_hints") or None,
                 treatments=est_cfg.get("treatments") or None,
+                # Reviewable lever-card diagnostics (#565): per-candidate-control measured residuals.
+                # STRICT opt-in (default OFF) — only an explicit true-like value turns it on. When off
+                # the only manifest delta is an additive empty nc_diagnostics:{} per candidate (no
+                # extra compute/IO); the card data is populated only when a customer asks for it.
+                nc_diagnostics=str(est_cfg.get("nc_diagnostics", False)).strip().lower()
+                in ("true", "1", "yes", "on"),
             )
             estimability_manifest = asdict(m)
             log(f"[estimability] {len(m.candidate_effects)} candidate effect(s), "
