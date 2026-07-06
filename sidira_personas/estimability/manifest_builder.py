@@ -329,8 +329,16 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
     # `nc_diagnostics` is on. It is EVERY numeric+varying column (spanning sibling-outcome AND
     # covariate-role columns) — the card shows the treatment's adjusted effect on all of them so a
     # human can see which ones move. Sorted for deterministic ordering + truncation. Per (T,Y) we
-    # additionally drop C==T and C==Y at the estimate site. Empty when the flag is off, so the
-    # default path never loads extra columns or does extra compute (byte-identical).
+    # additionally drop C==T and C==Y at the estimate site.
+    #   * Built FROM `cols` (the profiled column set), so nc_diag_pool ⊆ known_cols by construction —
+    #     the extended `need` load below can never ask load_frame for a column the store didn't
+    #     profile (same guarantee the existing X/vouched load already relies on); the post-load
+    #     `c in df.columns` re-intersection is belt-and-suspenders for mid-build schema drift.
+    #   * Empty when the flag is off, so the default path loads no extra columns and does no extra
+    #     compute. The ONLY default-off manifest delta is an additive empty ``nc_diagnostics: {}`` per
+    #     candidate (like the already-shipped ``neg_control_effects: {}`` / ``guard_floor`` siblings);
+    #     the consumer parses with ``extra="ignore"`` so it is non-breaking, and there is no
+    #     content-hash gate that the extra key could spuriously trip.
     nc_diag_pool = (sorted(c.name for c in cols if c.has_variation and c.dtype in ("number", "bool"))
                     if nc_diagnostics else [])
 
@@ -391,11 +399,13 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
             if nc_diagnostics:
                 pool = [c for c in nc_diag_pool if c != T and c != Y and c in df.columns]
                 if len(pool) > MAX_NC_DIAGNOSTICS:
-                    # Honest single aggregate key: the LARGEST pool truncation across candidates (the
-                    # per-candidate pools are the same size, so max — not a sum — reflects the real drop).
+                    # PER-CANDIDATE max, not a grid total: the key name says so explicitly so an
+                    # operator can't misread it as the summed count of skipped diagnostics. Every
+                    # supportable candidate diagnoses the same-size pool, so this max is the number of
+                    # controls dropped from the WORST (largest) card — the honest "up to N per card".
                     dropped_n = len(pool) - MAX_NC_DIAGNOSTICS
-                    truncated["nc_diagnostics_dropped"] = max(
-                        truncated.get("nc_diagnostics_dropped", 0), dropped_n)
+                    truncated["nc_diagnostics_max_dropped_per_candidate"] = max(
+                        truncated.get("nc_diagnostics_max_dropped_per_candidate", 0), dropped_n)
                     pool = pool[:MAX_NC_DIAGNOSTICS]
                 for C in pool:
                     # The control must NOT be in its own adjustment set — adjusting for it while
@@ -541,10 +551,13 @@ def build_manifest_from_frame(df: pd.DataFrame, customer_id: str, setup_id: str,
     still must be binary {0,1} to enter the empirical grid; non-conforming declarations are
     recorded on `Manifest.truncated`, never silently dropped (see `build_manifest`).
 
-    `nc_diagnostics` (default False -> byte-identical) opts IN to computing, per supportable
-    candidate, the treatment's adjusted effect on every numeric+varying candidate control
+    `nc_diagnostics` (default False) opts IN to computing, per supportable candidate, the
+    treatment's adjusted effect on every numeric+varying candidate control
     (`CandidateEffect.nc_diagnostics`) — the data a reviewable lever card (#565) shows so a human
     can vouch which controls actually reveal confounding. Bounded: capped at MAX_NC_DIAGNOSTICS.
+    Default-off is behaviorally unchanged (no extra columns loaded, no extra compute); the only
+    manifest delta is an additive empty ``nc_diagnostics: {}`` per candidate, which the
+    ``extra="ignore"`` consumer absorbs (no content-hash gate exists to trip on it).
     """
     # Cap the estimability sample (the pack/clustering upstream already used the full df).
     if len(df) > max_rows:

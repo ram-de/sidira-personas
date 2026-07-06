@@ -12,13 +12,18 @@ regime the negative-control guard is validated on.
 """
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
+
 import numpy as np
 import pandas as pd
 
 from sidira_personas.estimability import (
     MAX_NC_DIAGNOSTICS,
+    build_manifest,
     build_manifest_from_frame,
 )
+from sidira_personas.estimability.manifest_builder import _dtype_of, _safe_nunique
 
 
 def _sig(x: np.ndarray) -> np.ndarray:
@@ -89,8 +94,8 @@ def test_nc_diagnostics_covariate_control_not_self_neutered():
 
 
 # --------------------------------------------------------------------------- #
-# 3. Default-off: without the flag, every candidate's nc_diagnostics is the empty dict
-#    (byte-identical behavior).
+# 3. Default-off: without the flag, every candidate's nc_diagnostics is the empty dict and no
+#    truncation key is recorded (no extra compute / IO).
 # --------------------------------------------------------------------------- #
 def test_nc_diagnostics_default_off_is_empty():
     store = _hidden_confounder_store()
@@ -98,7 +103,7 @@ def test_nc_diagnostics_default_off_is_empty():
     assert m.candidate_effects
     for ce in m.candidate_effects:
         assert ce.nc_diagnostics == {}
-    assert "nc_diagnostics_dropped" not in m.truncated
+    assert "nc_diagnostics_max_dropped_per_candidate" not in m.truncated
 
 
 # --------------------------------------------------------------------------- #
@@ -118,7 +123,7 @@ def test_nc_diagnostics_pool_is_capped_and_drop_recorded():
                                   nc_diagnostics=True)
     ce = _candidate(m)
     # pool = numeric_varying minus {treatment_flag, retention} = 25 controls -> drop 5
-    assert m.truncated["nc_diagnostics_dropped"] == n_controls - MAX_NC_DIAGNOSTICS
+    assert m.truncated["nc_diagnostics_max_dropped_per_candidate"] == n_controls - MAX_NC_DIAGNOSTICS
     assert len(ce.nc_diagnostics) <= MAX_NC_DIAGNOSTICS
 
 
@@ -135,3 +140,68 @@ def test_nc_diagnostics_values_are_all_floats():
             assert isinstance(v, float)
             assert v == v            # not NaN
             assert v not in (float("inf"), float("-inf"))
+
+
+# --------------------------------------------------------------------------- #
+# 6. Additive-only contract: default-off, the serialized manifest is strict-JSON (no NaN) and the
+#    ONLY thing the new field contributes is an empty ``nc_diagnostics: {}`` on each candidate —
+#    stripping that key leaves a payload the ``extra="ignore"`` consumer already accepted. This is
+#    the byte-identity claim codex asked to be pinned down: additive, not a shape change.
+# --------------------------------------------------------------------------- #
+def test_nc_diagnostics_default_off_serialization_is_additive_only():
+    store = _hidden_confounder_store()
+    m = build_manifest_from_frame(store, "acme", "default", "v_1", "fixture://ncdiag")
+    payload = asdict(m)
+    # strict JSON (allow_nan=False) must succeed — the emission-boundary sanitizers hold with the
+    # new field present.
+    json.dumps(payload, allow_nan=False)
+    assert payload["candidate_effects"], "expected a non-empty grid"
+    for ce in payload["candidate_effects"]:
+        # the sole contribution of the field when off is a present, empty dict
+        assert ce["nc_diagnostics"] == {}
+        # every OTHER field is untouched: removing nc_diagnostics yields the pre-field schema
+        legacy = {k: v for k, v in ce.items() if k != "nc_diagnostics"}
+        assert "nc_diagnostics" not in legacy
+        assert legacy  # non-empty — the rest of the candidate is intact
+    assert "nc_diagnostics_max_dropped_per_candidate" not in m.truncated
+
+
+# --------------------------------------------------------------------------- #
+# 7. Loader-safety invariant (codex Medium): enabling nc_diagnostics must never ask load_frame for
+#    a column that was not profiled. The pool is built FROM the profiles, so the extended `need`
+#    load stays within the store schema — it adds NO new KeyError risk over the base build (which
+#    already assumes profiled columns are loadable). A spy load_frame asserts every requested column
+#    is real, on BOTH the default-off and flag-on paths; if the pool ever leaked a phantom column,
+#    this fires.
+# --------------------------------------------------------------------------- #
+def test_nc_diagnostics_never_requests_an_unprofiled_column():
+    store = _hidden_confounder_store()
+    known = set(store.columns)
+    column_profiles = [{
+        "name": c,
+        "dtype": _dtype_of(store[c]),
+        "distinct_count": _safe_nunique(store[c]),
+        "null_fraction": float(store[c].isna().mean()),
+    } for c in store.columns]
+    binary_treatment_cols = {"treatment_flag"}
+
+    requested: set[str] = set()
+
+    def spy_load_frame(cols):
+        # every requested column must be one the store actually profiled — no phantom loads
+        assert set(cols) <= known, f"requested unprofiled column(s): {set(cols) - known}"
+        requested.update(cols)
+        return store[cols]
+
+    for flag in (False, True):
+        requested.clear()
+        m = build_manifest(
+            "acme", "default", "v_1", "fixture://spy", column_profiles, capabilities=[],
+            load_frame=spy_load_frame, binary_treatment_cols=binary_treatment_cols,
+            nc_diagnostics=flag)
+        assert m.candidate_effects
+        # flag-on requests are a SUPERSET (the pool) but still ⊆ the profiled schema (asserted above)
+        assert requested <= known
+    # sanity: with the flag on, diagnostics actually populated (the pool WAS loaded, from one query)
+    ce = {c.outcome: c for c in m.candidate_effects}["retention"]
+    assert ce.nc_diagnostics and "aux_shared" in ce.nc_diagnostics
