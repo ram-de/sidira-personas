@@ -39,6 +39,14 @@ OUTCOME_HINTS = ("order", "retention", "retain", "convert", "conversion", "visit
                  "revenue", "churn", "engage", "active", "purchase", "signup", "subscribe")
 _TOKEN = re.compile(r"[a-z0-9]+")
 
+# The negative-control guard thresholds the manifest is built with. Kept as named constants (not
+# magic literals at the call site) so the value recorded on each CandidateEffect.guard_floor /
+# guard_ratio is provably the SAME value passed into negative_control_guard — the manifest and the
+# guard can never silently drift. These mirror the guard's own validated defaults (floor=0.05,
+# ratio=1.5; campaign iter1-iter5).
+NC_GUARD_FLOOR = 0.05
+NC_GUARD_RATIO = 1.5
+
 
 def _tokens(s: str) -> set[str]:
     return set(_TOKEN.findall(s.lower()))
@@ -83,6 +91,12 @@ class CandidateEffect:
     guard_trips: bool | None
     guard_confidence: str          # "high" | "low/abstain" | "unverified"
     guard_reason: str | None
+    # --- Full guard verdict fields (the exact keys the sidira-simulator consumer schema reads,
+    #     backend/sidira_simulator/schemas/estimability.py::CandidateEffect). Additive/defaulted so
+    #     the unsupportable / unverified rows and any direct constructor call stay valid.
+    neg_control_effects: dict[str, float] = field(default_factory=dict)
+    guard_floor: float | None = None      # from GuardedEstimate.floor (the |residual| trip threshold)
+    guard_ratio: float | None = None      # the indistinguishability ratio the guard was run with
 
 
 @dataclass
@@ -227,24 +241,31 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
                     T, Y, X, False, sup.reasons, sup.n_treat, sup.n_control,
                     None, None, None, None, None, None,
                     neg_controls=[], neg_control_effect=None, guard_trips=None,
-                    guard_confidence="unverified", guard_reason=None))
+                    guard_confidence="unverified", guard_reason=None,
+                    neg_control_effects={}, guard_floor=None, guard_ratio=None))
                 continue
             if ncs:
-                g = negative_control_guard(df, T, Y, ncs, X)
+                g = negative_control_guard(df, T, Y, ncs, X,
+                                           floor=NC_GUARD_FLOOR, ratio=NC_GUARD_RATIO)
                 est = g.estimate
                 neg_control_effect, guard_trips = g.neg_control_effect, g.trips
                 guard_confidence, guard_reason = g.confidence, g.reason
+                neg_control_effects = g.neg_control_effects
+                guard_floor, guard_ratio = g.floor, NC_GUARD_RATIO
             else:
                 est = estimate(df, T, Y, X)
                 neg_control_effect, guard_trips = None, None
                 guard_confidence, guard_reason = "unverified", None
+                neg_control_effects = {}
+                guard_floor, guard_ratio = None, None
             effects.append(CandidateEffect(
                 T, Y, X, True, [], sup.n_treat, sup.n_control,
                 est.naive_ate, est.t_learner_ate, est.ipw_ate,
                 est.overlap_fraction, est.naive_adjusted_gap, est.sign_adjusted,
                 neg_controls=ncs, neg_control_effect=neg_control_effect,
                 guard_trips=guard_trips, guard_confidence=guard_confidence,
-                guard_reason=guard_reason))
+                guard_reason=guard_reason, neg_control_effects=neg_control_effects,
+                guard_floor=guard_floor, guard_ratio=guard_ratio))
     return Manifest("1.0", customer_id, setup_id, pack_version, feature_store,
                     cols, links, effects, truncated)
 
