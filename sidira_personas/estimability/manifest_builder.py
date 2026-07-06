@@ -122,8 +122,9 @@ class CandidateEffect:
     # adjusted effect on EACH candidate control column (siblings AND covariate-role columns), keyed
     # by control name. A large |value| on a control the treatment cannot cause = confounding a human
     # reviewer should see. Default empty so every existing positional/keyword construction stays valid
-    # and the default-off path is byte-identical; only populated when build_manifest(nc_diagnostics=
-    # True) and only for the supportable branch. Strictly dict[str, float] (JSON-safe, no NaN/None).
+    # and the default-off delta is additive-only (a single empty ``{}`` per candidate, absorbed by the
+    # ``extra="ignore"`` consumer); only populated when build_manifest(nc_diagnostics=True) and only
+    # for the supportable branch. Strictly dict[str, float] (JSON-safe, no NaN/None).
     nc_diagnostics: dict[str, float] = field(default_factory=dict)
 
 
