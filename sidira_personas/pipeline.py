@@ -494,7 +494,10 @@ def run_pipeline(
                 # (else all None -> the downstream watchdog can only say CANT_VALIDATE). Heuristic,
                 # can false-trip (routes to LLM, never ships a wrong estimate); on by default,
                 # disable via `estimability.auto_neg_controls: false`. See default_neg_control_map.
-                auto_neg_controls=bool(est_cfg.get("auto_neg_controls", True)),
+                # Robust parse: an explicit false-like value (bool False or "false"/"0"/"no"/"off")
+                # disables it; anything else (incl. omitted) keeps the sensible default-on.
+                auto_neg_controls=str(est_cfg.get("auto_neg_controls", True)).strip().lower()
+                not in ("false", "0", "no", "off"),
             )
             estimability_manifest = asdict(m)
             log(f"[estimability] {len(m.candidate_effects)} candidate effect(s), "

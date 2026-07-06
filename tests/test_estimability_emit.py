@@ -93,6 +93,23 @@ def test_manifest_is_strict_json_safe(result_on):
     json.dumps(result_on.estimability_manifest, allow_nan=False)
 
 
+@pytest.mark.parametrize("disable_value", [False, "false", "off"])
+def test_auto_neg_controls_opt_out_boundary(df, disable_value):
+    """estimability enabled but `auto_neg_controls` explicitly disabled (bool False or a
+    false-like string) → the manifest is still emitted, but NO guard runs, so every
+    candidate carries guard_trips=None (downstream CANT_VALIDATE). Pins the opt-out
+    boundary and the robust string parse (a stray "false" must NOT read as truthy)."""
+    cfg = _base_cfg()
+    cfg["estimability"] = {"enabled": True, "auto_neg_controls": disable_value}
+    result = run_pipeline(df, cfg, run_id="synth-noauto", no_llm=True)
+
+    effects = result.estimability_manifest["candidate_effects"]
+    assert effects, "manifest should still emit candidates when auto-NC is off"
+    assert all(e["guard_trips"] is None for e in effects), (
+        "auto_neg_controls disabled must leave guard_trips=None on every candidate"
+    )
+
+
 def test_enabled_does_not_disturb_the_pack(result_on):
     """Enabling estimability only ADDS the manifest; the pack itself is still a normal v1.1 pack."""
     assert result_on.estimability_manifest is not None
