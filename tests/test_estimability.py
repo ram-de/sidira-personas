@@ -120,12 +120,76 @@ def test_guard_set_trips_on_consensus_max():
 
     g = negative_control_guard(df, "T", "Y", ["NC_weak", "NC_strong"], ["Xobs"])
     assert set(g.neg_control_effects) == {"NC_weak", "NC_strong"}
-    # the decisive residual is the max-|effect| control (the strong one), not the weak one
-    decisive = max(abs(v) for v in g.neg_control_effects.values())
-    assert abs(g.neg_control_effect) == decisive
+    # the decisive residual is the max-|standardized-effect| control (#586); here both controls
+    # are binary with similar sd, so it is the strong one under either selection rule
+    decisive_sd = max(abs(v) / df[k].std() for k, v in g.neg_control_effects.items())
+    assert abs(g.neg_control_effect_sd) == decisive_sd
     assert abs(g.neg_control_effects["NC_strong"]) > abs(g.neg_control_effects["NC_weak"])
     assert g.trips is True
     assert g.confidence == "low/abstain"
+
+
+# --------------------------------------------------------------------------- #
+# negative_control_guard: verdicts are SCALE-INVARIANT (#586). The raw-unit floor made
+# 0.05 effectively zero on minutes/count-scale columns -> structural over-abstain. Both
+# trip rules now compare standardized magnitudes, so multiplying the outcome and the
+# control by a large constant must not change any verdict.
+# --------------------------------------------------------------------------- #
+def _scaled_frame(confounded: bool, scale: float) -> pd.DataFrame:
+    rng = np.random.default_rng(23)
+    n = 4000
+    u = rng.standard_normal(n)                          # latent taste
+    w = u + 0.5 * rng.standard_normal(n)                # observed imperfect proxy of u
+    if confounded:
+        t = (rng.random(n) < _sig(1.2 * u)).astype(int)  # self-selected on u
+        eff = 0.0                                        # pure confounding, true effect 0
+    else:
+        t = (rng.random(n) < 0.5).astype(int)            # randomized
+        eff = 0.25
+    y = 1.0 * u + eff * t + 0.3 * rng.standard_normal(n)
+    nc = 1.0 * u + 0.3 * rng.standard_normal(n)          # pre-treatment: shares u, t can't cause it
+    return pd.DataFrame({"T": t, "Y": y * scale, "W": w, "NC": nc * scale})
+
+
+def test_guard_verdicts_scale_invariant():
+    for confounded, expect_trip in ((False, False), (True, True)):
+        g_unit = negative_control_guard(_scaled_frame(confounded, 1.0), "T", "Y", ["NC"], ["W"])
+        g_raw = negative_control_guard(_scaled_frame(confounded, 600.0), "T", "Y", ["NC"], ["W"])
+        assert g_unit.trips is expect_trip
+        assert g_raw.trips is expect_trip                 # raw "minutes" scale: same verdict
+        # the standardized decisive residual is the scale-free quantity the rules used
+        assert abs(g_raw.neg_control_effect_sd - g_unit.neg_control_effect_sd) < 1e-9
+
+
+# --------------------------------------------------------------------------- #
+# negative_control_guard: a CHANCE arm imbalance at finite n must not trip `hidden`
+# (#586, the M4 dry-run T2 regression: a cleanly randomized lever on a minutes-scale
+# outcome drew a ~1.4se NC residual and was abstained). The effective floor is
+# max(floor, 2x diff-in-means sampling noise), never below the configured floor.
+# --------------------------------------------------------------------------- #
+def test_guard_chance_imbalance_at_finite_n_does_not_trip():
+    rng = np.random.default_rng(4242)
+    n = 2500                                             # the dry-run's n
+    u = rng.standard_normal(n)
+    w = u + 0.5 * rng.standard_normal(n)                 # observed imperfect proxy
+    t = (rng.random(n) < 0.5).astype(int)                # randomized rollout
+    pre = 600.0 + 300.0 * u + 80.0 * rng.standard_normal(n)      # pre-period minutes NC
+    y = 610.0 + 300.0 * u + 60.0 * t + 80.0 * rng.standard_normal(n)
+    df = pd.DataFrame({"T": t, "Y": y, "W": w, "NC": pre})
+
+    g = negative_control_guard(df, "T", "Y", ["NC"], ["W"])
+    assert g.effective_floor >= g.floor                  # noise allowance only ever raises it
+    assert abs(g.neg_control_effect_sd) < g.effective_floor
+    assert g.trips is False
+    assert g.confidence == "high"
+    assert "sd" in g.reason                              # reason speaks standardized units
+
+    # ...while genuine confounding on the SAME raw scale still trips loudly
+    t_conf = (rng.random(n) < _sig(1.2 * u)).astype(int)
+    df_conf = pd.DataFrame({"T": t_conf, "Y": y, "W": w, "NC": pre})
+    g_conf = negative_control_guard(df_conf, "T", "Y", ["NC"], ["W"])
+    assert g_conf.trips is True
+    assert abs(g_conf.neg_control_effect_sd) > g_conf.effective_floor
 
 
 # --------------------------------------------------------------------------- #

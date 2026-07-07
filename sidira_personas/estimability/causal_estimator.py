@@ -47,12 +47,14 @@ class Estimate:
 @dataclass
 class GuardedEstimate:
     estimate: Estimate             # the main treatment->outcome effect
-    neg_control_effect: float      # the decisive (max-|effect|) negative-control residual
-    neg_control_effects: dict      # {control_name: adjusted treatment->control effect}
-    floor: float                   # max |effect| above this => residual confounding
+    neg_control_effect: float      # the decisive negative-control residual, RAW control units
+    neg_control_effects: dict      # {control_name: adjusted treatment->control effect, raw units}
+    floor: float                   # configured floor, in control-sd units (see guard docstring)
     trips: bool                    # True => abstain (route to LLM), estimate not trustworthy
     confidence: str                # 'high' (trust empirical) | 'low/abstain' (route to LLM)
     reason: str
+    neg_control_effect_sd: float = float("nan")   # decisive residual STANDARDIZED (per control-sd)
+    effective_floor: float = float("nan")         # max(floor, 2x sampling noise) actually applied
 
 
 def _Xmat(df: pd.DataFrame, X: list[str]) -> np.ndarray:
@@ -184,6 +186,23 @@ def negative_control_guard(df, treatment, outcome, neg_controls, covariates,
     confounding (closes the true-null gap; the cost is honestly deferring effects smaller than the
     bias to the LLM).
 
+    SCALE SEMANTICS (#586): both trip rules compare STANDARDIZED magnitudes — each control's
+    residual is divided by that control's sample sd, and the main effect by the outcome's sd —
+    so `floor` and `ratio` are scale-invariant (floor is in control-sd units). The raw-unit
+    comparison this replaces made the floor effectively zero on raw-scale columns (minutes,
+    counts, revenue): ANY residual on a sd~240 control exceeded 0.05, so every lever on such
+    data over-abstained regardless of design. On the validated campaign's ~unit-scale binary
+    outcomes (sd <= 0.5) standardization only widens the margin between the ~0 residuals that
+    passed and the large ones that tripped — the regression tests pin those verdicts unchanged.
+    Additionally, `hidden` uses an EFFECTIVE floor of max(floor, 2x sampling noise), where the
+    noise is the diff-in-means se in sd units, sqrt(1/n_treat + 1/n_control): a chance arm
+    imbalance at finite n is not evidence of confounding (the adjusted estimator's true se is
+    smaller than this proxy, so the allowance is generous only to the PASS side of `hidden` —
+    and the `ratio` rule still independently trips anything the bias can explain).
+    `neg_control_effect`/`neg_control_effects` stay in RAW control units (they are the lever
+    card's diagnostics); the standardized decisive residual and the applied floor are returned
+    on `neg_control_effect_sd` / `effective_floor` and spelled out in `reason`.
+
     NOTE (validated limits): power depends on at least one control STRONGLY coupled to the
     confounding (a weak set under-trips); nominating the controls is a domain/LLM judgment.
     """
@@ -216,18 +235,36 @@ def negative_control_guard(df, treatment, outcome, neg_controls, covariates,
             estimate=est, neg_control_effect=float("nan"), neg_control_effects={},
             floor=floor, trips=True, confidence="low/abstain",
             reason="no usable negative control (thin/degenerate arms): cannot verify, route to LLM")
-    decisive = max(effects.items(), key=lambda kv: abs(kv[1]))     # (name, effect) of max |effect|
-    nc_mag = abs(decisive[1])
-    main_mag = abs(est.t_learner_ate)
-    hidden = nc_mag > floor                                        # strong residual = hidden confounding
-    indistinct = main_mag <= ratio * nc_mag                       # effect not bigger than the bias (true-null/borderline)
+    # Standardize each residual by ITS control's sd (support_check guarantees every included
+    # control varies, so sd > 0; the finite-guard covers pathological all-NaN direct calls).
+    def _sd(col: str) -> float:
+        v = float(df[col].std())
+        return v if np.isfinite(v) and v > 0 else 1.0
+
+    effects_sd = {nc: eff / _sd(nc) for nc, eff in effects.items()}
+    decisive = max(effects_sd.items(), key=lambda kv: abs(kv[1]))  # (name, sd-effect) of max |sd-effect|
+    nc_name, nc_sd_eff = decisive
+    nc_raw_eff = effects[nc_name]
+    nc_mag = abs(nc_sd_eff)
+    main_mag = abs(est.t_learner_ate) / _sd(outcome)
+    # Sampling-noise allowance for `hidden`: the diff-in-means se in sd units. Arm sizes are
+    # read from the guard's own frame (post covariate-strip, pre per-control dropna — a
+    # conservative upper bound on both arms).
+    t_arm = df[treatment].to_numpy()
+    n_t, n_c = max(int((t_arm == 1).sum()), 1), max(int((t_arm == 0).sum()), 1)
+    effective_floor = max(floor, 2.0 * float(np.sqrt(1.0 / n_t + 1.0 / n_c)))
+    hidden = nc_mag > effective_floor                              # strong standardized residual = hidden confounding
+    indistinct = main_mag <= ratio * nc_mag                        # effect not bigger than the bias (true-null/borderline)
     trips = bool(hidden or indistinct)
-    reason = (f"negative control '{decisive[0]}' residual {decisive[1]:+.4f} > |{floor}|: hidden "
+    reason = (f"negative control '{nc_name}' standardized residual {nc_sd_eff:+.4f}sd "
+              f"(raw {nc_raw_eff:+.4f}) > floor {effective_floor:.4f}sd: hidden "
               "confounding, route to LLM" if hidden else
-              f"main effect {est.t_learner_ate:+.4f} not > {ratio}x the bias the control reveals "
-              f"({decisive[1]:+.4f}): indistinguishable from confounding, route to LLM" if indistinct else
-              f"main effect {est.t_learner_ate:+.4f} clears the bias (control max {decisive[1]:+.4f}): "
-              "estimate trusted")
+              f"main effect {est.t_learner_ate / _sd(outcome):+.4f}sd not > {ratio}x the standardized bias "
+              f"the control reveals ({nc_sd_eff:+.4f}sd): indistinguishable from confounding, "
+              "route to LLM" if indistinct else
+              f"main effect {est.t_learner_ate / _sd(outcome):+.4f}sd clears the standardized bias "
+              f"(control max {nc_sd_eff:+.4f}sd, floor {effective_floor:.4f}sd): estimate trusted")
     return GuardedEstimate(
-        estimate=est, neg_control_effect=decisive[1], neg_control_effects=effects,
-        floor=floor, trips=trips, confidence="low/abstain" if trips else "high", reason=reason)
+        estimate=est, neg_control_effect=nc_raw_eff, neg_control_effects=effects,
+        floor=floor, trips=trips, confidence="low/abstain" if trips else "high", reason=reason,
+        neg_control_effect_sd=nc_sd_eff, effective_floor=effective_floor)
