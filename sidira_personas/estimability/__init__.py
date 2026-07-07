@@ -7,7 +7,7 @@ Public API:
   - support_check / estimate / negative_control_guard  (causal_estimator)
   - Support / Estimate / GuardedEstimate dataclasses
   - build_manifest / build_manifest_from_frame / default_neg_control_map  (manifest_builder)
-  - Manifest / CandidateEffect / ColumnEntry / CapabilityLink dataclasses
+  - Manifest / CandidateEffect / ColumnEntry / CapabilityLink / CoverageEntry dataclasses
 """
 from __future__ import annotations
 
@@ -20,10 +20,14 @@ from .causal_estimator import (
     support_check,
 )
 from .manifest_builder import (
+    BEHAVIOURAL_NULL_THRESHOLD,
+    GROUNDING_GAP_TOKENS,
     MAX_NC_DIAGNOSTICS,
+    MIN_GROUNDING_COVARIATES,
     CandidateEffect,
     CapabilityLink,
     ColumnEntry,
+    CoverageEntry,
     Manifest,
     build_manifest,
     build_manifest_from_frame,
@@ -39,10 +43,14 @@ __all__ = [
     "negative_control_guard",
     "ColumnEntry",
     "CapabilityLink",
+    "CoverageEntry",
     "CandidateEffect",
     "Manifest",
     "build_manifest",
     "build_manifest_from_frame",
     "default_neg_control_map",
     "MAX_NC_DIAGNOSTICS",
+    "BEHAVIOURAL_NULL_THRESHOLD",
+    "MIN_GROUNDING_COVARIATES",
+    "GROUNDING_GAP_TOKENS",
 ]
