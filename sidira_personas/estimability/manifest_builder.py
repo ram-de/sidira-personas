@@ -51,6 +51,28 @@ NC_GUARD_RATIO = 1.5
 # Max candidate-control diagnostics computed per supportable effect (bounds build-time compute).
 MAX_NC_DIAGNOSTICS = 20
 
+# --- Coverage manifest + per-lever grounding-completeness (sidira-simulator#564) -------------
+# A column whose null_fraction is at/above this (but below 1.0) is "behavioural"-missing: the
+# column EXISTS and is tracked, users just mostly didn't do the thing. At/above 1.0 (or absent
+# from the store entirely) it is "structural": the company doesn't track it at all, and any
+# lever that needs it must route to the LLM — never be silently zero-imputed.
+BEHAVIOURAL_NULL_THRESHOLD = 0.5
+
+# Minimum adjustment covariates for a lever to count as grounding-complete. One numeric varying
+# covariate is the floor for the propensity/standardization fitters to adjust for ANYTHING; with
+# zero the "adjusted" estimate degenerates to the naive difference.
+MIN_GROUNDING_COVARIATES = 1
+
+# FIXED reason vocabulary for CandidateEffect.grounding_gaps (the consumer schema enumerates
+# these verbatim). Order here is the canonical emission order within any one gaps list.
+GROUNDING_GAP_TOKENS = (
+    "no_treatment_column",
+    "no_outcome_column",
+    "insufficient_covariates",
+    "no_vouched_negative_control",
+    "structurally_missing_column",
+)
+
 
 def _nan_to_none(x: float | None) -> float | None:
     """NaN/inf are not valid strict JSON. Emit ``None`` instead so ``json.dumps(..., allow_nan=
@@ -92,6 +114,27 @@ class CapabilityLink:
 
 
 @dataclass
+class CoverageEntry:
+    """One row of the pack-level coverage manifest (`Manifest.coverage`, #564).
+
+    `missingness` is the three-way honesty verdict:
+      - "present":     the column exists and is populated (null_fraction < BEHAVIOURAL_NULL_THRESHOLD)
+      - "behavioural": the column exists but is sparsely populated — users just didn't do the
+                       thing (BEHAVIOURAL_NULL_THRESHOLD <= null_fraction < 1.0)
+      - "structural":  the company doesn't track it — the column is absent from the source
+                       entirely, or present but 100% null
+
+    `observed` is False for a column the config EXPECTED (a declared outcome/treatment or a
+    mapped negative control) that the source doesn't have at all; its null_fraction is then
+    unknown (None).
+    """
+    name: str
+    missingness: str               # "present" | "structural" | "behavioural"
+    null_fraction: float | None    # None when the column is absent from the source (unknown)
+    observed: bool                 # True -> profiled from the source; False -> expected-but-absent
+
+
+@dataclass
 class CandidateEffect:
     treatment: str
     outcome: str
@@ -126,6 +169,16 @@ class CandidateEffect:
     # ``extra="ignore"`` consumer); only populated when build_manifest(nc_diagnostics=True) and only
     # for the supportable branch. Strictly dict[str, float] (JSON-safe, no NaN/None).
     nc_diagnostics: dict[str, float] = field(default_factory=dict)
+    # --- Per-lever grounding-completeness verdict (#564). A lever is grounding-complete iff it
+    # has (a) a treatment/proxy column, (b) an outcome column, (c) >= MIN_GROUNDING_COVARIATES
+    # adjustment covariates, and (d) >= 1 usable vouched negative control (consistent with the
+    # guard_confidence="unverified" semantics — no vouched NC is simply that gap, never a crash).
+    # `grounding_gaps` draws ONLY from GROUNDING_GAP_TOKENS and is empty iff grounding_complete.
+    # ORTHOGONAL to `supportable` (statistical estimability): a row can be grounding-complete yet
+    # unsupportable (thin arms) and vice versa; the router requires BOTH before trusting the
+    # empirical estimate. Additive/defaulted so existing constructor calls stay valid.
+    grounding_complete: bool = False
+    grounding_gaps: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -140,6 +193,10 @@ class Manifest:
     candidate_effects: list[CandidateEffect] = field(default_factory=list)
     truncated: dict = field(default_factory=dict)   # {"treatments_dropped": n, "outcomes_dropped": m}
     built_at: str | None = None    # stamped by the caller (worker), kept out for determinism
+    # Pack-level coverage manifest (#564): every profiled column plus every config-expected-but-
+    # absent column, each with a structural/behavioural/present missingness verdict. Appended
+    # LAST (after built_at) so every pre-existing positional construction stays valid.
+    coverage: list[CoverageEntry] = field(default_factory=list)
 
 
 def _classify(profiles: list[dict],
@@ -200,6 +257,54 @@ def _lowcard_treatments(cols: list[ColumnEntry]) -> list[str]:
     return sorted({c.name for c in cols
                    if c.role != "outcome_candidate" and c.has_variation
                    and c.distinct_count == 2})
+
+
+def _build_coverage(cols: list[ColumnEntry], expected: set[str]) -> list[CoverageEntry]:
+    """Classify every profiled column — plus every config-EXPECTED name the source lacks — into
+    the three-way missingness verdict (#564). `expected` is the union of declared outcomes/
+    treatments and mapped negative-control names; an expected name absent from the profiles is
+    the purest structural miss (the company doesn't have the column at all)."""
+    entries: list[CoverageEntry] = []
+    for c in cols:
+        nf = _nan_to_none(float(c.null_fraction))
+        if nf is not None and nf >= 1.0:
+            miss = "structural"        # column exists but is 100% null -> effectively untracked
+        elif nf is not None and nf >= BEHAVIOURAL_NULL_THRESHOLD:
+            miss = "behavioural"       # tracked, sparsely populated -> users didn't do the thing
+        else:
+            miss = "present"           # populated (or null_fraction unknown -> assume present)
+        entries.append(CoverageEntry(name=c.name, missingness=miss, null_fraction=nf,
+                                     observed=True))
+    known = {c.name for c in cols}
+    for name in sorted(expected - known):
+        entries.append(CoverageEntry(name=name, missingness="structural", null_fraction=None,
+                                     observed=False))
+    return entries
+
+
+def _grounding_verdict(t_present: bool, y_present: bool, covariates: list[str],
+                       usable_ncs: list[str], referenced: list[str],
+                       structural_cols: set[str]) -> tuple[bool, list[str]]:
+    """The per-lever grounding-completeness check (#564): (complete, gaps).
+
+    Gaps are drawn from the FIXED ``GROUNDING_GAP_TOKENS`` vocabulary, emitted in canonical
+    order; an empty list means grounding-complete. ``referenced`` is every column the lever's
+    empirical route would touch (T, Y, adjustment covariates, mapped NC names) — any of them
+    being structurally missing is a gap, so a structurally-absent column feeds THIS check
+    instead of being silently zero-imputed downstream.
+    """
+    gaps: list[str] = []
+    if not t_present:
+        gaps.append("no_treatment_column")
+    if not y_present:
+        gaps.append("no_outcome_column")
+    if len(covariates) < MIN_GROUNDING_COVARIATES:
+        gaps.append("insufficient_covariates")
+    if not usable_ncs:
+        gaps.append("no_vouched_negative_control")
+    if any(c in structural_cols for c in referenced):
+        gaps.append("structurally_missing_column")
+    return (not gaps, gaps)
 
 
 def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_store: str,
@@ -326,6 +431,16 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
     # degrades to the no-available-NC "unverified" path instead.
     known_cols = {c.name for c in cols}
 
+    # --- Coverage manifest (#564): classify every profiled column, plus every config-EXPECTED
+    # column the source lacks (declared outcomes/treatments + mapped NC names). Structural
+    # columns feed the per-lever grounding-completeness check below — a lever needing an
+    # untracked column is marked ungroundable and routes to the LLM, never zero-imputed.
+    nc_map = neg_control_map or {}
+    expected = (set(explicit_outcomes or ()) | set(explicit_treatments or ())
+                | set(nc_map.keys()) | {c for ncs_ in nc_map.values() for c in ncs_})
+    coverage = _build_coverage(cols, expected)
+    structural_cols = {e.name for e in coverage if e.missingness == "structural"}
+
     # Candidate-control pool for the reviewable lever-card diagnostics (#565), computed only when
     # `nc_diagnostics` is on. It is EVERY numeric+varying column (spanning sibling-outcome AND
     # covariate-role columns) — the card shows the treatment's adjusted effect on all of them so a
@@ -343,7 +458,6 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
     nc_diag_pool = (sorted(c.name for c in cols if c.has_variation and c.dtype in ("number", "bool"))
                     if nc_diagnostics else [])
 
-    nc_map = neg_control_map or {}
     effects: list[CandidateEffect] = []
     for T in treatments:
         for Y in outcomes:
@@ -365,6 +479,15 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
             need = list(dict.fromkeys([T, Y, *X, *vouched, *nc_diag_pool]))   # one query, deduped
             df = load_frame(need)                               # the ONE query, at build time
             ncs = [c for c in vouched if c in df.columns]
+            # Grounding-completeness verdict (#564), independent of the statistical support
+            # check below. T/Y exist by grid construction; the NC criterion counts only USABLE
+            # vouched controls (a 100%-null vouched control is structurally missing, not usable);
+            # `referenced` includes the RAW mapped NC names (pre known_cols filter) so a mapped
+            # control absent from the store surfaces as `structurally_missing_column` too.
+            mapped_raw = [c for c in nc_map.get(Y, []) if c != Y and c != T]
+            usable_ncs = [c for c in ncs if c not in structural_cols]
+            grounding_complete, grounding_gaps = _grounding_verdict(
+                True, True, X, usable_ncs, [T, Y, *X, *mapped_raw], structural_cols)
             sup = support_check(df, T, Y, X)
             if not sup.supportable:
                 effects.append(CandidateEffect(
@@ -372,7 +495,8 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
                     None, None, None, None, None, None,
                     neg_controls=[], neg_control_effect=None, guard_trips=None,
                     guard_confidence="unverified", guard_reason=None,
-                    neg_control_effects={}, guard_floor=None, guard_ratio=None))
+                    neg_control_effects={}, guard_floor=None, guard_ratio=None,
+                    grounding_complete=grounding_complete, grounding_gaps=grounding_gaps))
                 continue
             if ncs:
                 g = negative_control_guard(df, T, Y, ncs, X,
@@ -425,9 +549,47 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
                 neg_controls=ncs, neg_control_effect=neg_control_effect,
                 guard_trips=guard_trips, guard_confidence=guard_confidence,
                 guard_reason=guard_reason, neg_control_effects=neg_control_effects,
-                guard_floor=guard_floor, guard_ratio=guard_ratio, nc_diagnostics=diag))
+                guard_floor=guard_floor, guard_ratio=guard_ratio, nc_diagnostics=diag,
+                grounding_complete=grounding_complete, grounding_gaps=grounding_gaps))
+
+    # --- Ungroundable stubs for DECLARED levers/outcomes that are structurally missing (#564).
+    # Today a declared column absent from the store (or 100% null) only lands in the `truncated`
+    # accounting ledger; the router never sees it as a lever. Emit an explicit unsupportable
+    # candidate row for each so the consumer routes it to the LLM WITH a reason — the honest
+    # alternative to silent zero-imputation. Zero extra compute (no load_frame call). A declared
+    # structural treatment is paired with each surviving outcome (or, when none survived, each
+    # declared structural outcome); a declared structural outcome is paired with each surviving
+    # treatment. A structural declaration with no partner at all emits no row (there is nothing
+    # to route) and remains visible in `coverage` + `truncated`.
+    def _ungroundable_stub(t: str, y: str) -> CandidateEffect:
+        mapped_raw = [c for c in nc_map.get(y, []) if c != y and c != t]
+        vouched = [c for c in mapped_raw if c in known_cols]
+        usable = [c for c in vouched if c not in structural_cols]
+        # Mirror the grid's X: candidate covariates minus the lever and its vouched controls.
+        x_stub = [c for c in covars if c != t and c not in vouched]
+        complete, gaps = _grounding_verdict(
+            t not in structural_cols, y not in structural_cols,
+            x_stub, usable, [t, y, *x_stub, *mapped_raw], structural_cols)
+        return CandidateEffect(
+            t, y, x_stub, False,
+            ["declared column structurally missing (ungroundable; see grounding_gaps)"],
+            0, 0, None, None, None, None, None, None,
+            neg_controls=[], neg_control_effect=None, guard_trips=None,
+            guard_confidence="unverified", guard_reason=None,
+            neg_control_effects={}, guard_floor=None, guard_ratio=None,
+            grounding_complete=complete, grounding_gaps=gaps)
+
+    structural_treatments = sorted(t for t in (explicit_treatments or ()) if t in structural_cols)
+    structural_outcomes = sorted(y for y in (explicit_outcomes or ()) if y in structural_cols)
+    for t in structural_treatments:
+        for y in (outcomes or structural_outcomes):
+            effects.append(_ungroundable_stub(t, y))
+    for y in structural_outcomes:
+        for t in treatments:                      # disjoint from the loop above (kept levers only)
+            effects.append(_ungroundable_stub(t, y))
+
     return Manifest("1.0", customer_id, setup_id, pack_version, feature_store,
-                    cols, links, effects, truncated)
+                    cols, links, effects, truncated, coverage=coverage)
 
 
 def _dtype_of(s: pd.Series) -> str:

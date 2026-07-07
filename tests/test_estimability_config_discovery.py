@@ -103,7 +103,14 @@ def test_declared_absent_treatment_recorded():
         outcomes=["completion_rate"],
         treatments=["autoplay_enabled", "nonexistent_lever"],
     )
-    assert {c.treatment for c in m.candidate_effects} == {"autoplay_enabled"}
+    # The FIT grid still contains only the real lever; the declared-but-absent lever now ALSO
+    # gets an explicit ungroundable stub row (#564) — LLM route with a reason, never silent.
+    fitted = {c.treatment for c in m.candidate_effects if c.n_treat or c.n_control}
+    assert fitted == {"autoplay_enabled"}
+    stub = {c.treatment: c for c in m.candidate_effects}["nonexistent_lever"]
+    assert stub.supportable is False
+    assert stub.grounding_complete is False
+    assert "no_treatment_column" in stub.grounding_gaps
     assert m.truncated.get("treatments_declared_not_binary") == ["nonexistent_lever"]
 
 

@@ -512,8 +512,13 @@ def run_pipeline(
                 in ("true", "1", "yes", "on"),
             )
             estimability_manifest = asdict(m)
+            n_structural = sum(1 for e in m.coverage if e.missingness == "structural")
+            n_behavioural = sum(1 for e in m.coverage if e.missingness == "behavioural")
+            n_ungroundable = sum(1 for c in m.candidate_effects if not c.grounding_complete)
             log(f"[estimability] {len(m.candidate_effects)} candidate effect(s), "
-                f"{len([c for c in m.columns if c.role == 'treatment_candidate'])} lever(s); "
+                f"{len([c for c in m.columns if c.role == 'treatment_candidate'])} lever(s), "
+                f"{n_ungroundable} grounding-incomplete (LLM route); "
+                f"coverage: {n_structural} structural / {n_behavioural} behavioural; "
                 f"truncated={m.truncated}")
         except Exception as e:  # additive artifact: never fail the pack build
             estimability_manifest = {"status": "error", "reason": f"{type(e).__name__}: {e}"}
