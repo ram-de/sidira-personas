@@ -159,8 +159,13 @@ class CandidateEffect:
     #     backend/sidira_simulator/schemas/estimability.py::CandidateEffect). Additive/defaulted so
     #     the unsupportable / unverified rows and any direct constructor call stay valid.
     neg_control_effects: dict[str, float] = field(default_factory=dict)
-    guard_floor: float | None = None      # from GuardedEstimate.floor (the |residual| trip threshold)
+    guard_floor: float | None = None      # configured floor, in control-sd units (#586)
     guard_ratio: float | None = None      # the indistinguishability ratio the guard was run with
+    # #586 scale-invariant guard: the floor the `hidden` rule ACTUALLY applied
+    # (max(floor, capped sampling-noise allowance)) and the decisive residual in control-sd
+    # units. Additive/defaulted; the consumer schema absorbs unknown keys until it learns them.
+    guard_effective_floor: float | None = None
+    neg_control_effect_sd: float | None = None
     # Per-candidate-control diagnostic pool for the reviewable lever card (#565): the treatment's
     # adjusted effect on EACH candidate control column (siblings AND covariate-role columns), keyed
     # by control name. A large |value| on a control the treatment cannot cause = confounding a human
@@ -509,12 +514,15 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
                 guard_confidence, guard_reason = g.confidence, g.reason
                 neg_control_effects = _sanitize_effects(g.neg_control_effects)
                 guard_floor, guard_ratio = g.floor, NC_GUARD_RATIO
+                guard_effective_floor = _nan_to_none(g.effective_floor)
+                neg_control_effect_sd = _nan_to_none(g.neg_control_effect_sd)
             else:
                 est = estimate(df, T, Y, X)
                 neg_control_effect, guard_trips = None, None
                 guard_confidence, guard_reason = "unverified", None
                 neg_control_effects = {}
                 guard_floor, guard_ratio = None, None
+                guard_effective_floor, neg_control_effect_sd = None, None
             # Per-candidate-control diagnostics for the reviewable lever card (#565): the treatment's
             # adjusted effect on each candidate control. Computed only when the flag is on and only in
             # this supportable branch (the estimate below needs a supportable T->Y arm). The pool is
@@ -550,6 +558,8 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
                 guard_trips=guard_trips, guard_confidence=guard_confidence,
                 guard_reason=guard_reason, neg_control_effects=neg_control_effects,
                 guard_floor=guard_floor, guard_ratio=guard_ratio, nc_diagnostics=diag,
+                guard_effective_floor=guard_effective_floor,
+                neg_control_effect_sd=neg_control_effect_sd,
                 grounding_complete=grounding_complete, grounding_gaps=grounding_gaps))
 
     # --- Ungroundable stubs for DECLARED levers/outcomes that are structurally missing (#564).

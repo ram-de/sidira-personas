@@ -193,6 +193,30 @@ def test_guard_chance_imbalance_at_finite_n_does_not_trip():
 
 
 # --------------------------------------------------------------------------- #
+# negative_control_guard: the noise allowance is CAPPED at 2x floor. At thin (but
+# supportable) arm sizes an uncapped 2se would exceed 0.2sd and wave through real
+# moderate residual confounding — thin data must abstain via the floor, never earn a
+# pass because its noise is large.
+# --------------------------------------------------------------------------- #
+def test_guard_noise_allowance_capped_at_thin_n():
+    rng = np.random.default_rng(31)
+    n = 450                                              # ~225/arm: 2se ~ 0.19sd, uncapped > 2x floor
+    u = rng.standard_normal(n)
+    w = u + 0.5 * rng.standard_normal(n)
+    t = (rng.random(n) < _sig(0.6 * u)).astype(int)      # mildly self-selected -> moderate residual
+    y = 1.0 * u + 0.8 * t + 0.3 * rng.standard_normal(n)  # big estimated effect (beats the ratio rule)
+    nc = 1.0 * u + 0.3 * rng.standard_normal(n)
+    df = pd.DataFrame({"T": t, "Y": y, "W": w, "NC": nc})
+
+    g = negative_control_guard(df, "T", "Y", ["NC"], ["W"])
+    assert g.effective_floor <= 2.0 * g.floor + 1e-12    # the cap
+    # the moderate standardized residual exceeds the capped floor -> trips (an uncapped
+    # 2se floor of ~0.19sd would have passed it into false trust)
+    assert 2.0 * g.floor < abs(g.neg_control_effect_sd) < 0.19
+    assert g.trips is True
+
+
+# --------------------------------------------------------------------------- #
 # build_manifest_from_frame: supportable effect + populated guard verdict
 # --------------------------------------------------------------------------- #
 def _confounded_store(seed: int = 21, n: int = 4000) -> pd.DataFrame:

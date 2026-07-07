@@ -191,14 +191,16 @@ def negative_control_guard(df, treatment, outcome, neg_controls, covariates,
     so `floor` and `ratio` are scale-invariant (floor is in control-sd units). The raw-unit
     comparison this replaces made the floor effectively zero on raw-scale columns (minutes,
     counts, revenue): ANY residual on a sd~240 control exceeded 0.05, so every lever on such
-    data over-abstained regardless of design. On the validated campaign's ~unit-scale binary
-    outcomes (sd <= 0.5) standardization only widens the margin between the ~0 residuals that
-    passed and the large ones that tripped — the regression tests pin those verdicts unchanged.
-    Additionally, `hidden` uses an EFFECTIVE floor of max(floor, 2x sampling noise), where the
-    noise is the diff-in-means se in sd units, sqrt(1/n_treat + 1/n_control): a chance arm
-    imbalance at finite n is not evidence of confounding (the adjusted estimator's true se is
-    smaller than this proxy, so the allowance is generous only to the PASS side of `hidden` —
-    and the `ratio` rule still independently trips anything the bias can explain).
+    data over-abstained regardless of design. On binary controls (sd <= 0.5) standardization
+    TIGHTENS the floor (0.05sd is <= 0.025 raw at p=0.5) — a strictly conservative direction;
+    the regression tests pin the validated campaign fixtures' verdicts, which sit far from
+    that boundary, unchanged. Additionally, `hidden` uses an EFFECTIVE floor of
+    max(floor, min(2x sampling noise, 2x floor)), where the noise is the decisive control's
+    diff-in-means se in sd units, sqrt(1/n_treat + 1/n_control): a chance arm imbalance at
+    finite n is not evidence of confounding. The allowance is CAPPED at 2x the configured
+    floor so thin data can never earn a pass merely because its noise is large — at small n
+    the guard returns to (at most twice) its configured strictness and residual confounding
+    above 2x floor always trips.
     `neg_control_effect`/`neg_control_effects` stay in RAW control units (they are the lever
     card's diagnostics); the standardized decisive residual and the applied floor are returned
     on `neg_control_effect_sd` / `effective_floor` and spelled out in `reason`.
@@ -223,10 +225,22 @@ def negative_control_guard(df, treatment, outcome, neg_controls, covariates,
     # (or constant/non-binary/thin) is not estimable, and estimating it would crash the per-arm
     # fitter (empty `y_arm` -> `y_arm[0]`). Only supportable controls contribute a residual; the
     # rest are skipped (this leaves valid-data behaviour identical — every usable control is kept).
+    # sd and arm counts for a column are computed on the SAME analytic frame its estimate
+    # used (estimate() dropnas [treatment, col, *covariates] internally) — a full-column sd
+    # over rows the fitter never saw could deflate the standardized residual (codex P2).
+    def _frame_stats(col: str) -> tuple[float, int, int]:
+        sub = df.dropna(subset=[treatment, col, *covariates])
+        v = float(sub[col].std())
+        t_arm = sub[treatment].to_numpy()
+        return (v if np.isfinite(v) and v > 0 else 1.0,
+                max(int((t_arm == 1).sum()), 1), max(int((t_arm == 0).sum()), 1))
+
     effects: dict = {}
+    stats: dict = {}
     for nc in names:
         if support_check(df, treatment, nc, covariates).supportable:
             effects[nc] = float(estimate(df, treatment, nc, covariates).t_learner_ate)
+            stats[nc] = _frame_stats(nc)
     # No usable control survived support-checking (every mapped control had a thin/degenerate arm).
     # We cannot verify the estimate, so conservatively abstain -> route to LLM, rather than trust an
     # unverifiable effect or estimate a degenerate control.
@@ -235,34 +249,30 @@ def negative_control_guard(df, treatment, outcome, neg_controls, covariates,
             estimate=est, neg_control_effect=float("nan"), neg_control_effects={},
             floor=floor, trips=True, confidence="low/abstain",
             reason="no usable negative control (thin/degenerate arms): cannot verify, route to LLM")
-    # Standardize each residual by ITS control's sd (support_check guarantees every included
-    # control varies, so sd > 0; the finite-guard covers pathological all-NaN direct calls).
-    def _sd(col: str) -> float:
-        v = float(df[col].std())
-        return v if np.isfinite(v) and v > 0 else 1.0
-
-    effects_sd = {nc: eff / _sd(nc) for nc, eff in effects.items()}
+    effects_sd = {nc: eff / stats[nc][0] for nc, eff in effects.items()}
     decisive = max(effects_sd.items(), key=lambda kv: abs(kv[1]))  # (name, sd-effect) of max |sd-effect|
     nc_name, nc_sd_eff = decisive
     nc_raw_eff = effects[nc_name]
     nc_mag = abs(nc_sd_eff)
-    main_mag = abs(est.t_learner_ate) / _sd(outcome)
-    # Sampling-noise allowance for `hidden`: the diff-in-means se in sd units. Arm sizes are
-    # read from the guard's own frame (post covariate-strip, pre per-control dropna — a
-    # conservative upper bound on both arms).
-    t_arm = df[treatment].to_numpy()
-    n_t, n_c = max(int((t_arm == 1).sum()), 1), max(int((t_arm == 0).sum()), 1)
-    effective_floor = max(floor, 2.0 * float(np.sqrt(1.0 / n_t + 1.0 / n_c)))
+    sd_y, _, _ = _frame_stats(outcome)
+    main_mag = abs(est.t_learner_ate) / sd_y
+    # Sampling-noise allowance for `hidden`: the diff-in-means se (in sd units) of the DECISIVE
+    # control's own analytic frame. CAPPED at 2x the configured floor — beyond that, thin data
+    # must abstain via the floor itself, never earn a pass BECAUSE its noise is large (codex P1:
+    # an uncapped 2se at min-arm sizes would wave through real ~0.2sd residual confounding).
+    _, n_t, n_c = stats[nc_name]
+    noise_allowance = min(2.0 * float(np.sqrt(1.0 / n_t + 1.0 / n_c)), 2.0 * floor)
+    effective_floor = max(floor, noise_allowance)
     hidden = nc_mag > effective_floor                              # strong standardized residual = hidden confounding
     indistinct = main_mag <= ratio * nc_mag                        # effect not bigger than the bias (true-null/borderline)
     trips = bool(hidden or indistinct)
     reason = (f"negative control '{nc_name}' standardized residual {nc_sd_eff:+.4f}sd "
               f"(raw {nc_raw_eff:+.4f}) > floor {effective_floor:.4f}sd: hidden "
               "confounding, route to LLM" if hidden else
-              f"main effect {est.t_learner_ate / _sd(outcome):+.4f}sd not > {ratio}x the standardized bias "
+              f"main effect {est.t_learner_ate / sd_y:+.4f}sd not > {ratio}x the standardized bias "
               f"the control reveals ({nc_sd_eff:+.4f}sd): indistinguishable from confounding, "
               "route to LLM" if indistinct else
-              f"main effect {est.t_learner_ate / _sd(outcome):+.4f}sd clears the standardized bias "
+              f"main effect {est.t_learner_ate / sd_y:+.4f}sd clears the standardized bias "
               f"(control max {nc_sd_eff:+.4f}sd, floor {effective_floor:.4f}sd): estimate trusted")
     return GuardedEstimate(
         estimate=est, neg_control_effect=nc_raw_eff, neg_control_effects=effects,
