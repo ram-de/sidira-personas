@@ -192,11 +192,11 @@ class Manifest:
     capability_links: list[CapabilityLink] = field(default_factory=list)
     candidate_effects: list[CandidateEffect] = field(default_factory=list)
     truncated: dict = field(default_factory=dict)   # {"treatments_dropped": n, "outcomes_dropped": m}
-    # Pack-level coverage manifest (#564): every profiled column plus every config-expected-but-
-    # absent column, each with a structural/behavioural/present missingness verdict. Placed after
-    # `truncated` so the existing positional construction stays valid.
-    coverage: list[CoverageEntry] = field(default_factory=list)
     built_at: str | None = None    # stamped by the caller (worker), kept out for determinism
+    # Pack-level coverage manifest (#564): every profiled column plus every config-expected-but-
+    # absent column, each with a structural/behavioural/present missingness verdict. Appended
+    # LAST (after built_at) so every pre-existing positional construction stays valid.
+    coverage: list[CoverageEntry] = field(default_factory=list)
 
 
 def _classify(profiles: list[dict],
@@ -589,7 +589,7 @@ def build_manifest(customer_id: str, setup_id: str, pack_version: str, feature_s
             effects.append(_ungroundable_stub(t, y))
 
     return Manifest("1.0", customer_id, setup_id, pack_version, feature_store,
-                    cols, links, effects, truncated, coverage)
+                    cols, links, effects, truncated, coverage=coverage)
 
 
 def _dtype_of(s: pd.Series) -> str:
